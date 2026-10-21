@@ -1,0 +1,21 @@
+{
+  "name": "development",
+  "ios": {
+    "resourceClass": "m1-medium",
+    "enterpriseProvisioning": "universal",
+    "bitcode": false,
+    " SimulateLocation ": false
+  },
+  "android": {
+    "buildType": "apk",
+    "rootProject": "expo-dev-loader"
+  },
+  "env": {
+    "EXPO_PUBLIC_NEON_API_URL": "https://db.${YOUR_PROJECT_REF}.supabase.co/rest/v1",
+    "EXPO_PUBLIC_NEON_API_KEY": "YOUR_ANON_KEY",
+    "EXPO_PUBLIC_IMAGEKIT_URL_ENDPOINT": "YOUR_IMAGEKIT_URL_ENDPOINT",
+    "EXPO_PUBLIC_IMAGEKIT_PUBLIC_KEY": "YOUR_IMAGEKIT_PUBLIC_KEY",
+    "EXPO_PUBLIC_TRIGGER_DEV_URL": "https://trigger.local/api/trigger/YOUR_TRIGGER_JOB_URL",
+    "EXPO_PUBLIC_OPENAI_API_KEY": "YOUR_OPENAI_API_KEY"
+  }
+}
