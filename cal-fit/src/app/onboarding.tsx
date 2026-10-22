@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Card, IconCircle, OptionCard, PrimaryButton, ProgressBar, Screen } from '@/components/kit';
 import { SliderCard } from '@/components/onboarding/SliderCard';
@@ -17,7 +17,7 @@ import {
   MACRO_SPLIT,
 } from '@/lib/nutrition';
 
-const STEP_COUNT = 8;
+const STEP_COUNT = 9;
 
 const GOAL_COPY: Record<string, string> = {
   gain_weight: 'This will help you gain weight and build muscle steadily.',
@@ -30,6 +30,7 @@ export default function OnboardingScreen() {
   const { saveProfile } = useUser();
   const [step, setStep] = useState(0);
   const [gender, setGender] = useState<Gender | null>(null);
+  const [age, setAge] = useState(25);
   const [height, setHeight] = useState(175);
   const [weight, setWeight] = useState(62);
   const [goalWeight, setGoalWeight] = useState(75);
@@ -37,6 +38,8 @@ export default function OnboardingScreen() {
   const [experience, setExperience] = useState<string | null>(null);
   const [goal, setGoal] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  // Marketing consent must be an explicit opt-in, so it starts unchecked.
+  const [marketingOptIn, setMarketingOptIn] = useState(false);
 
   const targets =
     gender && activity && goal
@@ -47,11 +50,12 @@ export default function OnboardingScreen() {
           goalWeightKg: goalWeight,
           activityLevel: activity,
           goal,
+          age,
         })
       : null;
 
   // Whether "Next" is enabled on each step (sliders always have a value).
-  const canContinue = [!!gender, true, true, true, !!activity, !!experience, !!goal, !!targets][step];
+  const canContinue = [!!gender, true, true, true, true, !!activity, !!experience, !!goal, !!targets][step];
   const isLast = step === STEP_COUNT - 1;
 
   async function handleFinish() {
@@ -68,7 +72,8 @@ export default function OnboardingScreen() {
         goal,
         unit_preference: 'metric',
         daily_calorie_target: targets.calories,
-        age: null,
+        age,
+        marketing_opt_in: marketingOptIn,
       });
       // The root layout's guards switch to the tabs once the profile exists; this is a fallback.
       router.replace('/');
@@ -117,24 +122,30 @@ export default function OnboardingScreen() {
       )}
 
       {step === 1 && (
+        <Step title="How old are you?" subtitle="Your age changes how many calories your body burns at rest.">
+          <SliderCard label="Age" value={age} unit="years" min={14} max={90} icon="calendar-outline" onChange={setAge} />
+        </Step>
+      )}
+
+      {step === 2 && (
         <Step title="What's your height?" subtitle="We'll use this to calculate your calorie needs.">
           <SliderCard label="Height" value={height} unit="cm" min={140} max={210} icon="body-outline" onChange={setHeight} />
         </Step>
       )}
 
-      {step === 2 && (
+      {step === 3 && (
         <Step title="What's your current weight?" subtitle="This helps us track your progress.">
           <SliderCard label="Current weight" value={weight} unit="kg" min={50} max={120} icon="scale-outline" onChange={setWeight} />
         </Step>
       )}
 
-      {step === 3 && (
+      {step === 4 && (
         <Step title="What's your goal weight?" subtitle="Set a realistic target for steady progress.">
           <SliderCard label="Goal weight" value={goalWeight} unit="kg" min={50} max={150} icon="locate-outline" onChange={setGoalWeight} />
         </Step>
       )}
 
-      {step === 4 && (
+      {step === 5 && (
         <Step title="How active are you?" subtitle="This helps us set the right calorie target for you.">
           {ACTIVITY_LEVELS.map(level => (
             <OptionCard
@@ -149,7 +160,7 @@ export default function OnboardingScreen() {
         </Step>
       )}
 
-      {step === 5 && (
+      {step === 6 && (
         <Step title="How much gym experience do you have?">
           {GYM_EXPERIENCE.map(level => (
             <OptionCard
@@ -164,7 +175,7 @@ export default function OnboardingScreen() {
         </Step>
       )}
 
-      {step === 6 && (
+      {step === 7 && (
         <Step title="What's your main goal?">
           {GOALS.map(option => (
             <OptionCard
@@ -178,7 +189,7 @@ export default function OnboardingScreen() {
         </Step>
       )}
 
-      {step === 7 && targets && (
+      {step === 8 && targets && (
         <View style={styles.result}>
           <View style={styles.halo}>
             <View style={styles.haloInner}>
@@ -196,6 +207,22 @@ export default function OnboardingScreen() {
           </Card>
 
           <Text style={styles.resultCopy}>{GOAL_COPY[goal ?? ''] ?? GOAL_COPY.gain_weight}</Text>
+
+          <Pressable
+            onPress={() => setMarketingOptIn(v => !v)}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: marketingOptIn }}
+            style={styles.optIn}
+          >
+            <Ionicons
+              name={marketingOptIn ? 'checkbox' : 'square-outline'}
+              size={22}
+              color={marketingOptIn ? colors.primary : colors.textMuted}
+            />
+            <Text style={styles.optInText}>
+              Email me tips, recipes and offers from Cal-Fit. You can turn this off any time in Profile.
+            </Text>
+          </Pressable>
         </View>
       )}
     </Screen>
@@ -328,5 +355,18 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 20,
     paddingHorizontal: 16,
+  },
+  optIn: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginTop: 20,
+    paddingHorizontal: 8,
+  },
+  optInText: {
+    ...type.body,
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 19,
   },
 });

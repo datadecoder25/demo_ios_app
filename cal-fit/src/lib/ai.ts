@@ -3,9 +3,9 @@
  * stores it and runs the `analyze-meal` Trigger.dev task (OpenAI) with server-side keys.
  */
 
-import { Platform } from 'react-native';
-
+import { apiUrl } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
+import { appendPhoto } from '@/lib/photos';
 
 export interface AiAnalysisResponse {
   calories: number;
@@ -29,7 +29,12 @@ export interface MealAnalysisResult {
   analysis: AiAnalysisResponse;
   /** Object-storage key of the uploaded photo; saved as the meal's photo_url. */
   photoKey: string;
+  /** Balance after the server spent this scan's credit. */
+  creditsLeft: number;
 }
+
+/** The server refused the scan because the user has no credits left (HTTP 402). */
+export class NoCreditsError extends Error {}
 
 /** Uploads a local photo (file:// on native, blob: on web) and returns its analysis. */
 export async function triggerAiAnalysis(localImageUri: string): Promise<MealAnalysisResult> {
@@ -39,24 +44,19 @@ export async function triggerAiAnalysis(localImageUri: string): Promise<MealAnal
   }
 
   const formData = new FormData();
-  if (Platform.OS === 'web') {
-    // Browsers need the actual file data; the { uri } shape only works in React Native.
-    const blob = await (await fetch(localImageUri)).blob();
-    formData.append('photo', blob, 'meal.jpg');
-  } else {
-    formData.append('photo', { uri: localImageUri, name: 'meal.jpg', type: 'image/jpeg' } as any);
-  }
+  await appendPhoto(formData, localImageUri);
 
   try {
-    // Relative URL: resolves to the dev server in development (set the expo-router
-    // `origin` plugin option for production native builds).
-    const response = await fetch('/api/analyze-meal', {
+    const response = await fetch(apiUrl('/api/analyze-meal'), {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
       body: formData,
     });
 
     const data = await response.json().catch(() => null);
+    if (response.status === 402) {
+      throw new NoCreditsError(data?.message || 'You have no AI scans left this month.');
+    }
     if (!response.ok) {
       throw new Error(data?.message || `AI analysis failed: ${response.status}`);
     }

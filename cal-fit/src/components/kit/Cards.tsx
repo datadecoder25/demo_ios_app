@@ -155,7 +155,8 @@ export function ListRow({
   return (
     <Pressable
       onPress={onPress}
-      accessibilityRole="button"
+      disabled={!onPress}
+      accessibilityRole={onPress ? 'button' : 'text'}
       style={({ pressed }) => [styles.listRow, pressed && styles.pressed]}
     >
       <Ionicons name={icon} size={20} color={tint} />

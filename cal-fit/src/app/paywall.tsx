@@ -1,31 +1,31 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { PrimaryButton, Screen } from '@/components/kit';
 import { colors, fonts, radius, shadow, type } from '@/constants/design';
-import { Alert } from '@/lib/alert';
+import { FREE_MONTHLY_CREDITS, useCredits } from '@/hooks/useCredits';
+import { goBack } from '@/lib/navigation';
 
-// Placeholder pricing until in-app purchases (react-native-iap) are wired up.
-const PLANS = [
-  { id: 'monthly', name: 'Monthly', price: '$9.99', period: 'per month' },
-  { id: 'yearly', name: 'Yearly', price: '$79.99', period: 'per year', badge: 'Most Popular', save: 'Save 33%' },
-] as const;
-
-const FEATURES = [
-  'AI Meal Scanner (unlimited)',
-  'Personalized Meal Plans',
-  'Advanced Progress Analytics',
-  'Exclusive High-Calorie Recipes',
-  'Habit & Streak Tracking',
-  'Priority Support',
+// What every account gets today; AI scans are the only metered feature.
+const FREE_FEATURES = [
+  `${FREE_MONTHLY_CREDITS} AI meal scans every month`,
+  'Unlimited manual food logging',
+  'Daily calorie & macro targets',
+  'Streaks, XP and daily tasks',
+  'Weight tracking & progress photos',
 ];
 
-type PlanId = (typeof PLANS)[number]['id'];
+const PREMIUM_FEATURES = ['Unlimited AI meal scans', 'Advanced progress analytics', 'Priority support'];
 
+function formatDay(date: Date) {
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+/** Plan & credits screen. Purchases aren't available yet, so nothing here pretends to sell. */
 export default function PaywallScreen() {
-  const [plan, setPlan] = useState<PlanId>('yearly');
+  const { balance, usedThisMonth, renewsOn } = useCredits();
+  const close = () => goBack();
 
   return (
     <Screen
@@ -33,77 +33,75 @@ export default function PaywallScreen() {
       scroll
       footer={
         <>
-          <PrimaryButton
-            title="Start Free Trial"
-            onPress={() => Alert.alert('Coming Soon', 'In-app purchases are coming soon.')}
-          />
-          <Text style={styles.footnote}>Cancel anytime. No hidden fees.</Text>
+          <PrimaryButton title="Got It" onPress={close} />
+          <Text style={styles.footnote}>Free scans renew automatically on the 1st of every month.</Text>
         </>
       }
     >
       <View style={styles.badge}>
-        <Ionicons name="diamond" size={12} color={colors.white} />
-        <Text style={styles.badgeText}>Premium</Text>
+        <Ionicons name="sparkles" size={12} color={colors.white} />
+        <Text style={styles.badgeText}>Free plan</Text>
       </View>
-      <Text style={styles.title}>Unlock Your Full Potential</Text>
-      <Text style={styles.subtitle}>Get personalized plans, AI meal analysis, progress tracking and more.</Text>
+      <Text style={styles.title}>Your AI Scans</Text>
+      <Text style={styles.subtitle}>Each AI meal scan uses one credit. Manual logging is always free.</Text>
 
       <LinearGradient
         colors={['#E3F0FF', '#D3F4F1']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
-        style={styles.trial}
+        style={styles.balance}
       >
-        <View style={styles.trialIcon}>
-          <Ionicons name="water" size={22} color={colors.primary} />
+        <View style={styles.balanceIcon}>
+          <Ionicons name="scan" size={22} color={colors.primary} />
         </View>
-        <View>
-          <Text style={styles.trialTitle}>
-            <Text style={{ color: colors.primary }}>3 Day</Text> Free Trial
+        <View style={styles.balanceText}>
+          <Text style={styles.balanceTitle}>
+            <Text style={{ color: colors.primary }}>{balance ?? '–'}</Text>{' '}
+            {balance === 1 ? 'scan' : 'scans'} left
           </Text>
-          <Text style={styles.trialSub}>Then $9.99/month or $79.99/year</Text>
+          <Text style={styles.balanceSub}>
+            {usedThisMonth} used this month • {FREE_MONTHLY_CREDITS} more on {formatDay(renewsOn)}
+          </Text>
         </View>
       </LinearGradient>
 
       <View style={styles.plans}>
-        {PLANS.map(p => {
-          const selected = plan === p.id;
-          return (
-            <Pressable
-              key={p.id}
-              onPress={() => setPlan(p.id)}
-              accessibilityRole="radio"
-              accessibilityState={{ selected }}
-              style={[styles.plan, selected && styles.planSelected]}
-            >
-              {'badge' in p && (
-                <View style={styles.popular}>
-                  <Text style={styles.popularText}>{p.badge}</Text>
-                </View>
-              )}
-              <Text style={styles.planName}>{p.name}</Text>
-              <Text style={styles.planPrice}>{p.price}</Text>
-              <Text style={styles.planPeriod}>{p.period}</Text>
-              {'save' in p && (
-                <View style={styles.save}>
-                  <Text style={styles.saveText}>{p.save}</Text>
-                </View>
-              )}
-            </Pressable>
-          );
-        })}
+        <View style={[styles.plan, styles.planCurrent]}>
+          <View style={styles.tag}>
+            <Text style={styles.tagText}>Current</Text>
+          </View>
+          <Text style={styles.planName}>Free</Text>
+          <Text style={styles.planPrice}>$0</Text>
+          <Text style={styles.planPeriod}>{FREE_MONTHLY_CREDITS} scans / month</Text>
+        </View>
+        <View style={[styles.plan, styles.planSoon]}>
+          <View style={[styles.tag, styles.tagSoon]}>
+            <Text style={styles.tagText}>Coming soon</Text>
+          </View>
+          <Text style={styles.planName}>Premium</Text>
+          <Text style={styles.planPrice}>Soon</Text>
+          <Text style={styles.planPeriod}>unlimited scans</Text>
+        </View>
       </View>
 
+      <Text style={styles.sectionTitle}>Included in your plan</Text>
       <View style={styles.features}>
-        {FEATURES.map((feature, i) => {
-          const last = i === FEATURES.length - 1;
-          return (
-            <View key={feature} style={styles.feature}>
-              <Ionicons name="checkmark" size={18} color={colors.primary} />
-              <Text style={[styles.featureText, last && { color: colors.primary }]}>{feature}</Text>
-            </View>
-          );
-        })}
+        {FREE_FEATURES.map(feature => (
+          <View key={feature} style={styles.feature}>
+            <Ionicons name="checkmark" size={18} color={colors.primary} />
+            <Text style={styles.featureText}>{feature}</Text>
+          </View>
+        ))}
+      </View>
+
+      <Text style={styles.sectionTitle}>Coming with Premium</Text>
+      <View style={styles.features}>
+        {PREMIUM_FEATURES.map(feature => (
+          <View key={feature} style={styles.feature}>
+            <Ionicons name="time-outline" size={18} color={colors.textMuted} />
+            <Text style={[styles.featureText, styles.featureSoon]}>{feature}</Text>
+          </View>
+        ))}
       </View>
     </Screen>
   );
@@ -134,7 +132,7 @@ const styles = StyleSheet.create({
     ...type.body,
     marginTop: 6,
   },
-  trial: {
+  balance: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
@@ -144,7 +142,7 @@ const styles = StyleSheet.create({
     padding: 16,
     marginTop: 20,
   },
-  trialIcon: {
+  balanceIcon: {
     width: 40,
     height: 40,
     borderRadius: 20,
@@ -152,12 +150,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  trialTitle: {
+  balanceText: {
+    flex: 1,
+  },
+  balanceTitle: {
     fontFamily: fonts.bold,
     fontSize: 18,
     color: colors.navy,
   },
-  trialSub: {
+  balanceSub: {
     ...type.caption,
     color: colors.textSecondary,
     marginTop: 2,
@@ -165,7 +166,7 @@ const styles = StyleSheet.create({
   plans: {
     flexDirection: 'row',
     gap: 12,
-    marginTop: 18,
+    marginTop: 22,
   },
   plan: {
     flex: 1,
@@ -178,11 +179,14 @@ const styles = StyleSheet.create({
     minHeight: 120,
     ...shadow,
   },
-  planSelected: {
+  planCurrent: {
     borderColor: colors.primary,
     backgroundColor: '#F7FAFF',
   },
-  popular: {
+  planSoon: {
+    opacity: 0.75,
+  },
+  tag: {
     position: 'absolute',
     top: -11,
     right: 12,
@@ -191,7 +195,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 3,
   },
-  popularText: {
+  tagSoon: {
+    backgroundColor: colors.textMuted,
+  },
+  tagText: {
     fontFamily: fonts.semibold,
     fontSize: 10,
     color: colors.white,
@@ -208,24 +215,13 @@ const styles = StyleSheet.create({
   planPeriod: {
     ...type.caption,
   },
-  save: {
-    position: 'absolute',
-    bottom: -1,
-    right: -1,
-    backgroundColor: colors.primary,
-    borderTopLeftRadius: radius.md,
-    borderBottomRightRadius: radius.lg,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  saveText: {
-    fontFamily: fonts.semibold,
-    fontSize: 10,
-    color: colors.white,
+  sectionTitle: {
+    ...type.label,
+    marginTop: 24,
   },
   features: {
     gap: 12,
-    marginTop: 22,
+    marginTop: 12,
   },
   feature: {
     flexDirection: 'row',
@@ -236,6 +232,9 @@ const styles = StyleSheet.create({
     fontFamily: fonts.medium,
     fontSize: 15,
     color: colors.navy,
+  },
+  featureSoon: {
+    color: colors.textSecondary,
   },
   footnote: {
     ...type.caption,

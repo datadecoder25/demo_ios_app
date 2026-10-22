@@ -111,20 +111,24 @@ export function BarChart({
   );
 }
 
-/** Row of streak dots: green = logged, navy = today, ring = upcoming. */
-export function StreakDots({ days }: { days: ('done' | 'today' | 'upcoming')[] }) {
+export type StreakDay = { label: string; state: 'done' | 'missed' | 'today' };
+
+/** Row of day dots: green = meal logged, ring = nothing logged, navy ring = today (not logged yet). */
+export function StreakDots({ days }: { days: StreakDay[] }) {
   return (
     <View style={styles.dots}>
       {days.map((d, i) => (
-        <View
-          key={i}
-          style={[
-            styles.dot,
-            d === 'done' && { backgroundColor: colors.success },
-            d === 'today' && { backgroundColor: colors.navy },
-            d === 'upcoming' && styles.dotUpcoming,
-          ]}
-        />
+        <View key={i} style={styles.dotCol}>
+          <View
+            style={[
+              styles.dot,
+              d.state === 'done' && { backgroundColor: colors.success },
+              d.state === 'missed' && styles.dotMissed,
+              d.state === 'today' && styles.dotToday,
+            ]}
+          />
+          <Text style={styles.dotLabel}>{d.label}</Text>
+        </View>
       ))}
     </View>
   );
@@ -183,16 +187,28 @@ const styles = StyleSheet.create({
   },
   dots: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
+    justifyContent: 'space-between',
+  },
+  dotCol: {
+    alignItems: 'center',
+    gap: 4,
   },
   dot: {
     width: 16,
     height: 16,
     borderRadius: 8,
   },
-  dotUpcoming: {
+  dotMissed: {
     borderWidth: 1.5,
     borderColor: '#C9D3E6',
+  },
+  dotToday: {
+    borderWidth: 2,
+    borderColor: colors.navy,
+  },
+  dotLabel: {
+    fontFamily: fonts.regular,
+    fontSize: 9,
+    color: colors.textMuted,
   },
 });

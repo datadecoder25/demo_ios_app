@@ -2,7 +2,7 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { AuthScaffold, FormError } from '@/components/auth/AuthScaffold';
+import { AuthScaffold, FormError, isValidEmail, MIN_PASSWORD_LENGTH } from '@/components/auth/AuthScaffold';
 import { PrimaryButton, TextField } from '@/components/kit';
 import { useUser } from '@/contexts/UserContext';
 
@@ -17,6 +17,14 @@ export default function SignUpScreen() {
   async function handleSubmit() {
     if (!name.trim() || !email.trim() || !password) {
       setError('Please fill in all fields.');
+      return;
+    }
+    if (!isValidEmail(email.trim())) {
+      setError('Please enter a valid email address.');
+      return;
+    }
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      setError(`Your password needs at least ${MIN_PASSWORD_LENGTH} characters.`);
       return;
     }
 
@@ -59,7 +67,7 @@ export default function SignUpScreen() {
       />
       <TextField
         label="Password"
-        placeholder="Create a strong password"
+        placeholder={`At least ${MIN_PASSWORD_LENGTH} characters`}
         value={password}
         onChangeText={setPassword}
         password

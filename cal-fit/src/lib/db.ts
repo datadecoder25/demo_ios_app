@@ -4,7 +4,7 @@
  * Row-Level Security in db/schema.sql scopes every query to that user.
  */
 
-import { getAccessToken } from '@/lib/auth';
+import { clearAccessToken, getAccessToken } from '@/lib/auth';
 
 const NEON_API_URL = process.env.EXPO_PUBLIC_NEON_API_URL;
 
@@ -13,11 +13,20 @@ interface DbResponse<T> {
   error: Error | null;
 }
 
-async function fetchNeon<T>(endpoint: string, options?: RequestInit): Promise<DbResponse<T>> {
+const RETRY_DELAY_MS = 800;
+
+async function fetchNeon<T>(endpoint: string, options?: RequestInit, attempt = 0): Promise<DbResponse<T>> {
   if (!NEON_API_URL) {
     console.error('Neon API URL not configured');
     return { data: null, error: new Error('Neon API not configured') };
   }
+
+  // Retries once on network errors, 5xx (e.g. a stale Data API schema cache) and 401
+  // (an expired JWT, refreshed first), so a brief hiccup doesn't blank a screen.
+  const retry = async () => {
+    await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+    return fetchNeon<T>(endpoint, options, attempt + 1);
+  };
 
   try {
     const token = await getAccessToken();
@@ -34,9 +43,19 @@ async function fetchNeon<T>(endpoint: string, options?: RequestInit): Promise<Db
       ...options?.headers,
     };
 
-    const response = await fetch(url, { ...options, headers });
+    let response: Response;
+    try {
+      response = await fetch(url, { ...options, headers });
+    } catch (networkError) {
+      if (attempt === 0) return retry();
+      throw networkError;
+    }
 
     if (!response.ok) {
+      if (attempt === 0 && (response.status === 401 || response.status >= 500)) {
+        if (response.status === 401) clearAccessToken();
+        return retry();
+      }
       throw new Error(`Neon API error: ${response.status} ${response.statusText}`);
     }
 
@@ -61,11 +80,16 @@ export interface Profile {
   goal: string | null;
   unit_preference: 'imperial' | 'metric';
   daily_calorie_target: number | null;
+  /** Consent to marketing emails; the database stamps marketing_opt_in_at itself. */
+  marketing_opt_in: boolean;
+  marketing_opt_in_at: string | null;
   created_at: string;
   updated_at: string;
 }
 
-export type ProfileInput = Partial<Omit<Profile, 'id' | 'user_id' | 'created_at' | 'updated_at'>>;
+export type ProfileInput = Partial<
+  Omit<Profile, 'id' | 'user_id' | 'marketing_opt_in_at' | 'created_at' | 'updated_at'>
+>;
 
 export const profileApi = {
   async getByUserId(userId: string) {
@@ -81,46 +105,34 @@ export const profileApi = {
   },
 };
 
-export const mealApi = {
-  async getByUserId(userId: string, date?: string) {
-    let endpoint = `meal?user_id=eq.${userId}&is_deleted=eq.false`;
-    if (date) {
-      endpoint += `&created_at=eq.${date}`;
-    }
-    return fetchNeon<{
-      id: string;
-      user_id: string;
-      photo_url: string | null;
-      analysis_json: any | null;
-      created_at: string;
-      is_manual: boolean;
-      manual_name: string | null;
-    }>(endpoint);
-  },
+export type MealType = 'breakfast' | 'lunch' | 'dinner' | 'snack';
 
+export interface Meal {
+  id: string;
+  user_id: string;
+  photo_url: string | null;
+  analysis_json: any | null;
+  created_at: string;
+  is_manual: boolean;
+  manual_name: string | null;
+  meal_type: MealType | null;
+}
+
+export const mealApi = {
   /** Meals created at or after `since` (ISO timestamp), newest first. */
   async getSince(userId: string, since: string) {
-    return fetchNeon<{
-      id: string;
-      user_id: string;
-      photo_url: string | null;
-      analysis_json: any | null;
-      created_at: string;
-      is_manual: boolean;
-      manual_name: string | null;
-    }>(`meal?user_id=eq.${userId}&is_deleted=eq.false&created_at=gte.${encodeURIComponent(since)}&order=created_at.desc`);
+    return fetchNeon<Meal>(
+      `meal?user_id=eq.${userId}&is_deleted=eq.false&created_at=gte.${encodeURIComponent(since)}&order=created_at.desc`
+    );
+  },
+
+  /** The most recent meals, newest first (for "Recent" foods and history). */
+  async getRecent(userId: string, limit = 50) {
+    return fetchNeon<Meal>(`meal?user_id=eq.${userId}&is_deleted=eq.false&order=created_at.desc&limit=${limit}`);
   },
 
   async getById(id: string) {
-    return fetchNeon<{
-      id: string;
-      user_id: string;
-      photo_url: string | null;
-      analysis_json: any | null;
-      created_at: string;
-      is_manual: boolean;
-      manual_name: string | null;
-    }>(`meal?id=eq.${id}`);
+    return fetchNeon<Meal>(`meal?id=eq.${id}`);
   },
 
   async create(data: {
@@ -129,26 +141,27 @@ export const mealApi = {
     analysis_json?: any | null;
     is_manual: boolean;
     manual_name?: string | null;
+    meal_type?: MealType | null;
   }) {
-    return fetchNeon<{ id: string }>('meal', {
+    return fetchNeon<Meal>('meal', {
       method: 'POST',
       body: JSON.stringify(data),
     });
   },
 
   async update(id: string, data: Partial<{
-    photo_url: string | null;
     analysis_json: any | null;
     manual_name: string | null;
+    meal_type: MealType | null;
   }>) {
-    return fetchNeon<{ id: string }>(`meal?id=eq.${id}`, {
+    return fetchNeon<Meal>(`meal?id=eq.${id}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     });
   },
 
   async delete(id: string) {
-    return fetchNeon<null>(`meal?id=eq.${id}`, {
+    return fetchNeon<Meal>(`meal?id=eq.${id}`, {
       method: 'PATCH',
       body: JSON.stringify({ is_deleted: true }),
     });
@@ -207,18 +220,6 @@ export const creditTransactionApi = {
       body: '{}',
     });
   },
-
-  async deductCredits(userId: string, amount: number, mealId: string) {
-    return fetchNeon<{ id: string }>('credit_transaction', {
-      method: 'POST',
-      body: JSON.stringify({ 
-        user_id: userId, 
-        amount: -amount, 
-        type: 'used',
-        reference_id: mealId,
-      }),
-    });
-  },
 };
 
 export const imageCacheApi = {
@@ -243,5 +244,87 @@ export const imageCacheApi = {
         expires_at: expiresAt,
       }),
     });
+  },
+};
+
+export interface WeightLog {
+  id: string;
+  user_id: string;
+  weight_kg: number;
+  photo_key: string | null;
+  logged_at: string;
+}
+
+export const weightApi = {
+  /** All check-ins, oldest first. */
+  async list(userId: string) {
+    return fetchNeon<WeightLog>(`weight_log?user_id=eq.${userId}&order=logged_at.asc`);
+  },
+
+  async create(data: { weight_kg: number; photo_key?: string | null; logged_at?: string }) {
+    return fetchNeon<WeightLog>('weight_log', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async delete(id: string) {
+    return fetchNeon<WeightLog>(`weight_log?id=eq.${id}`, { method: 'DELETE' });
+  },
+};
+
+export type Habit = 'water' | 'workout';
+
+export interface HabitLog {
+  id: string;
+  user_id: string;
+  day: string;
+  habit: Habit;
+  amount: number;
+}
+
+export const habitApi = {
+  /** Habit rows for local days in [fromDay, toDay] (YYYY-MM-DD). */
+  async getRange(userId: string, fromDay: string, toDay: string) {
+    return fetchNeon<HabitLog>(`habit_log?user_id=eq.${userId}&day=gte.${fromDay}&day=lte.${toDay}`);
+  },
+
+  /** Sets the day's amount for a habit (ml of water, or 1/0 for a workout). */
+  async set(userId: string, day: string, habit: Habit, amount: number) {
+    return fetchNeon<HabitLog>('habit_log?on_conflict=user_id,day,habit', {
+      method: 'POST',
+      headers: { 'Prefer': 'return=representation,resolution=merge-duplicates' },
+      body: JSON.stringify({ user_id: userId, day, habit, amount: Math.max(0, amount), updated_at: new Date().toISOString() }),
+    });
+  },
+};
+
+export interface UserStats {
+  current_streak: number;
+  best_streak: number;
+  logged_today: boolean;
+  days_logged: number;
+  meals_logged: number;
+  days_on_target: number;
+  weigh_ins: number;
+  workouts: number;
+  xp: number;
+}
+
+export const statsApi = {
+  /** Streaks and XP, with days counted in the device's time zone (see user_stats in db/schema.sql). */
+  async get() {
+    let tz = 'UTC';
+    try {
+      tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    } catch {
+      // Keep UTC.
+    }
+    const { data, error } = await fetchNeon<UserStats>('rpc/user_stats', {
+      method: 'POST',
+      body: JSON.stringify({ tz }),
+    });
+    // A scalar-returning RPC comes back as a bare object, not an array.
+    return { data: (data as unknown as UserStats | null) ?? null, error };
   },
 };

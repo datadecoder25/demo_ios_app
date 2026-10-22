@@ -1,103 +1,80 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 
+import { Alert } from '@/lib/alert';
+import { preparePhoto } from '@/lib/photos';
+
 interface CameraContextType {
+  /** Local URI of the picked photo, already resized and re-encoded as JPEG. */
   imageUri: string | null;
-  setImageUri: (uri: string | null) => void;
-  cameraPermission: boolean;
-  cameraRollPermission: boolean;
-  requestCameraPermission: () => Promise<void>;
-  requestCameraRollPermission: () => Promise<void>;
+  /** True while a picked photo is being resized/re-encoded. */
+  isPreparing: boolean;
+  /** Why the last pick failed (unreadable format, permission denied…), if it did. */
+  pickError: string | null;
   pickFromCamera: () => Promise<void>;
   pickFromCameraRoll: () => Promise<void>;
-  isBlurry: (uri: string) => boolean;
   clearImage: () => void;
 }
 
 const CameraContext = createContext<CameraContextType | undefined>(undefined);
 
+const PICKER_OPTIONS: ImagePicker.ImagePickerOptions = {
+  allowsEditing: false,
+  // Full quality here: preparePhoto does the one and only re-encode.
+  quality: 1,
+  mediaTypes: ['images'],
+};
+
 export function CameraProvider({ children }: { children: React.ReactNode }) {
   const [imageUri, setImageUri] = useState<string | null>(null);
-  const [cameraPermission, setCameraPermission] = useState(false);
-  const [cameraRollPermission, setCameraRollPermission] = useState(false);
+  const [isPreparing, setIsPreparing] = useState(false);
+  const [pickError, setPickError] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function checkPermissions() {
-      const { status: cameraStatus } = await ImagePicker.getCameraPermissionsAsync();
-      const { status: cameraRollStatus } = await ImagePicker.getMediaLibraryPermissionsAsync();
+  async function handleResult(result: ImagePicker.ImagePickerResult) {
+    if (result.canceled || !result.assets?.[0]) return;
+    const asset = result.assets[0];
 
-      setCameraPermission(cameraStatus === 'granted');
-      setCameraRollPermission(cameraRollStatus === 'granted');
+    setIsPreparing(true);
+    try {
+      setImageUri(await preparePhoto(asset.uri, asset.width, asset.height, asset.mimeType));
+    } catch (error) {
+      setPickError(error instanceof Error ? error.message : 'Could not open that photo.');
+    } finally {
+      setIsPreparing(false);
     }
-
-    checkPermissions();
-  }, []);
-
-  async function requestCameraPermission() {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    setCameraPermission(status === 'granted');
-  }
-
-  async function requestCameraRollPermission() {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    setCameraRollPermission(status === 'granted');
   }
 
   async function pickFromCamera() {
-    if (!cameraPermission) {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      setCameraPermission(status === 'granted');
-      if (status !== 'granted') return;
+    setPickError(null);
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Camera access needed', 'Allow camera access in Settings to snap your meals.');
+      return;
     }
-
-    const result = await ImagePicker.launchCameraAsync({
-      allowsEditing: false,
-      quality: 0.8,
-      mediaTypes: ['images'],
-    });
-
-    if (!result.canceled) {
-      setImageUri(result.assets[0].uri);
-    }
+    await handleResult(await ImagePicker.launchCameraAsync(PICKER_OPTIONS));
   }
 
   async function pickFromCameraRoll() {
-    if (!cameraRollPermission) {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      setCameraRollPermission(status === 'granted');
-      if (status !== 'granted') return;
+    setPickError(null);
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Photo access needed', 'Allow photo library access in Settings to choose a meal photo.');
+      return;
     }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      allowsEditing: false,
-      quality: 0.8,
-      mediaTypes: ['images'],
-    });
-
-    if (!result.canceled) {
-      setImageUri(result.assets[0].uri);
-    }
+    await handleResult(await ImagePicker.launchImageLibraryAsync(PICKER_OPTIONS));
   }
 
   function clearImage() {
     setImageUri(null);
-  }
-
-  function isBlurry(uri: string): boolean {
-    // For now, always return false
-    return false;
+    setPickError(null);
   }
 
   const value: CameraContextType = {
     imageUri,
-    setImageUri,
-    cameraPermission,
-    cameraRollPermission,
-    requestCameraPermission,
-    requestCameraRollPermission,
+    isPreparing,
+    pickError,
     pickFromCamera,
     pickFromCameraRoll,
-    isBlurry,
     clearImage,
   };
 

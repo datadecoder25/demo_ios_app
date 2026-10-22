@@ -1,23 +1,33 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Card, ListRow } from '@/components/kit';
 import { colors, fonts, radius, screenPadding } from '@/constants/design';
 import { useUser } from '@/contexts/UserContext';
+import { useCredits } from '@/hooks/useCredits';
+import { useStats } from '@/hooks/useStats';
 import { Alert } from '@/lib/alert';
-import { GOALS } from '@/lib/nutrition';
-
-// SAMPLE: subscriptions aren't wired to in-app purchases yet.
-const SAMPLE_PLAN = { name: 'Premium', activeUntil: 'Dec 2026' };
-
-function comingSoon(feature: string) {
-  Alert.alert('Coming soon', `${feature} will be available in a future update.`);
-}
+import { ACTIVITY_LEVELS, GOALS, levelFor } from '@/lib/nutrition';
 
 export default function ProfileScreen() {
-  const { user, profile, signOut } = useUser();
+  const { user, profile, signOut, saveProfile } = useUser();
+  const [isSavingOptIn, setIsSavingOptIn] = useState(false);
+
+  async function toggleMarketing(value: boolean) {
+    setIsSavingOptIn(true);
+    try {
+      await saveProfile({ marketing_opt_in: value });
+    } catch {
+      Alert.alert('Error', 'Could not update your email preference. Please try again.');
+    } finally {
+      setIsSavingOptIn(false);
+    }
+  }
+  const { balance, renewsOn } = useCredits();
+  const { stats } = useStats();
 
   const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || 'Your profile';
   const initials =
@@ -27,22 +37,18 @@ export default function ProfileScreen() {
       .join('') || (user?.email?.[0]?.toUpperCase() ?? '?');
 
   const goalLabel = GOALS.find(g => g.value === profile?.goal)?.label ?? 'No goal set';
-  const goalSubtitle = profile?.goal_weight ? `${goalLabel} • ${Number(profile.goal_weight)} kg` : goalLabel;
+  const goalSubtitle = [
+    goalLabel,
+    profile?.goal_weight ? `${Number(profile.goal_weight)} kg` : null,
+    profile?.daily_calorie_target ? `${profile.daily_calorie_target.toLocaleString()} kcal/day` : null,
+    ACTIVITY_LEVELS.find(a => a.value === profile?.activity_level)?.label,
+  ]
+    .filter(Boolean)
+    .join(' • ');
 
-  const showGoals = () => {
-    if (!profile) return comingSoon('Goal editing');
-    Alert.alert(
-      'My Goals',
-      [
-        `Goal: ${goalLabel}`,
-        profile.weight ? `Current weight: ${Number(profile.weight)} kg` : null,
-        profile.goal_weight ? `Goal weight: ${Number(profile.goal_weight)} kg` : null,
-        profile.daily_calorie_target ? `Daily target: ${profile.daily_calorie_target.toLocaleString()} kcal` : null,
-      ]
-        .filter(Boolean)
-        .join('\n')
-    );
-  };
+  const renewal = renewsOn.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const scans = balance == null ? 'Loading scans…' : `${balance} AI ${balance === 1 ? 'scan' : 'scans'} left`;
+  const level = levelFor(stats?.xp ?? 0);
 
   const confirmLogout = () => {
     Alert.alert('Log Out', 'Are you sure you want to log out?', [
@@ -63,9 +69,9 @@ export default function ProfileScreen() {
             {user?.email && <Text style={styles.email}>{user.email}</Text>}
             <View style={styles.planRow}>
               <View style={styles.planPill}>
-                <Text style={styles.planPillText}>{SAMPLE_PLAN.name}</Text>
+                <Text style={styles.planPillText}>Free plan</Text>
               </View>
-              <Text style={styles.planMeta}>Active until {SAMPLE_PLAN.activeUntil}</Text>
+              <Text style={styles.planMeta}>{scans}</Text>
             </View>
           </View>
           <Pressable
@@ -79,34 +85,76 @@ export default function ProfileScreen() {
           </Pressable>
         </View>
 
+        <Card style={styles.stats}>
+          <Stat value={stats ? String(stats.current_streak) : '–'} label="Day streak" />
+          <View style={styles.statDivider} />
+          <Stat value={stats ? `Lv ${level.level}` : '–'} label={`${(stats?.xp ?? 0).toLocaleString()} XP`} />
+          <View style={styles.statDivider} />
+          <Stat value={stats ? String(stats.meals_logged) : '–'} label="Meals logged" />
+        </Card>
+
         <Card style={styles.list}>
-          <ListRow icon="trophy-outline" title="My Goals" subtitle={goalSubtitle} onPress={showGoals} />
           <ListRow
-            icon="notifications-outline"
-            title="Reminders"
-            subtitle="Meal, workout, water"
-            onPress={() => router.push('/notifications')}
+            icon="trophy-outline"
+            title="My Goals & Body"
+            subtitle={goalSubtitle}
+            onPress={() => router.push('/edit-profile')}
           />
           <ListRow
-            icon="card-outline"
-            title="Subscription"
-            subtitle={`${SAMPLE_PLAN.name} • Active`}
-            onPress={() => router.push('/paywall')}
+            icon="scale-outline"
+            title="Log weight"
+            subtitle="Add a check-in with an optional photo"
+            onPress={() => router.push('/check-in')}
+          />
+          <ListRow
+            icon="images-outline"
+            title="Progress photos"
+            subtitle="Compare your transformation"
+            onPress={() => router.push('/transformation')}
           />
         </Card>
 
         <Card style={styles.list}>
-          <ListRow icon="settings-outline" title="Settings" onPress={() => comingSoon('Settings')} />
+          <ListRow
+            icon="sparkles-outline"
+            title="AI scans"
+            subtitle={balance == null ? 'Free plan' : `Free plan • ${scans} • renews ${renewal}`}
+            onPress={() => router.push('/paywall')}
+          />
           <ListRow
             icon="notifications-circle-outline"
-            title="Notification Preferences"
+            title="Activity"
+            subtitle="Your recent progress and reminders"
             onPress={() => router.push('/notifications')}
           />
-          <ListRow icon="help-circle-outline" title="Help & Support" onPress={() => comingSoon('Help & Support')} />
+          <View style={styles.toggleRow}>
+            <Ionicons name="mail-outline" size={20} color={colors.primary} />
+            <View style={styles.toggleText}>
+              <Text style={styles.toggleTitle}>Email updates</Text>
+              <Text style={styles.toggleSubtitle}>Tips, recipes and offers</Text>
+            </View>
+            <Switch
+              value={!!profile?.marketing_opt_in}
+              onValueChange={toggleMarketing}
+              disabled={!profile || isSavingOptIn}
+              trackColor={{ true: colors.primary, false: colors.track }}
+              accessibilityLabel="Email updates"
+            />
+          </View>
+          <ListRow icon="speedometer-outline" title="Units" subtitle="Metric (kg, cm)" showChevron={false} />
           <ListRow icon="log-out-outline" title="Log Out" danger onPress={confirmLogout} />
         </Card>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function Stat({ value, label }: { value: string; label: string }) {
+  return (
+    <View style={styles.stat}>
+      <Text style={styles.statValue}>{value}</Text>
+      <Text style={styles.statLabel}>{label}</Text>
+    </View>
   );
 }
 
@@ -185,5 +233,52 @@ const styles = StyleSheet.create({
   },
   list: {
     paddingVertical: 0,
+  },
+  stats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+  },
+  stat: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 2,
+  },
+  statValue: {
+    fontFamily: fonts.bold,
+    fontSize: 18,
+    color: colors.navy,
+  },
+  statLabel: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: colors.textSecondary,
+  },
+  statDivider: {
+    width: 1,
+    alignSelf: 'stretch',
+    backgroundColor: colors.border,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  toggleText: {
+    flex: 1,
+  },
+  toggleTitle: {
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: colors.navy,
+  },
+  toggleSubtitle: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 1,
   },
 });

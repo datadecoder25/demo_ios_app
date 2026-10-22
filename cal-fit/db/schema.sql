@@ -91,7 +91,8 @@ create index if not exists image_cache_hash_idx on public.image_cache (hash, exp
 -- Grants: only signed-in users (role `authenticated`) touch app data; `anonymous` gets nothing.
 grant usage on schema public to authenticated;
 grant select, insert, update, delete on public.profile, public.meal, public.meal_food to authenticated;
-grant select, insert on public.credit_transaction, public.image_cache to authenticated;
+grant select on public.credit_transaction to authenticated;
+grant select, insert on public.image_cache to authenticated;
 revoke all on public.profile, public.meal, public.meal_food, public.credit_transaction, public.image_cache from anonymous;
 
 -- Row-Level Security.
@@ -126,10 +127,8 @@ drop policy if exists credit_tx_select_own on public.credit_transaction;
 create policy credit_tx_select_own on public.credit_transaction for select to authenticated
   using (user_id = (select auth.user_id())::uuid);
 
--- Users may only spend credits; free/purchase grants go through security-definer functions.
-drop policy if exists credit_tx_insert_spend on public.credit_transaction;
-create policy credit_tx_insert_spend on public.credit_transaction for insert to authenticated
-  with check (user_id = (select auth.user_id())::uuid and type = 'used' and amount < 0);
+-- No insert policy: every ledger write goes through a security-definer function
+-- (claim_free_credits, spend_credit).
 
 drop policy if exists image_cache_read on public.image_cache;
 create policy image_cache_read on public.image_cache for select to authenticated
@@ -168,4 +167,223 @@ grant execute on function public.claim_free_credits() to authenticated;
 commit;
 
 -- Tell the Data API to reload its schema cache.
+notify pgrst, 'reload schema';
+
+-- ---------------------------------------------------------------------------
+-- Tracking: meal types, weight check-ins (with optional progress photo),
+-- daily habits (water / workout) and the stats behind streaks and XP.
+-- ---------------------------------------------------------------------------
+begin;
+
+alter table public.meal add column if not exists meal_type text
+  check (meal_type in ('breakfast', 'lunch', 'dinner', 'snack'));
+
+-- Weight check-ins. The latest one is mirrored into profile.weight by the app.
+create table if not exists public.weight_log (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null default (auth.user_id())::uuid
+    references neon_auth."user"(id) on delete cascade,
+  weight_kg numeric not null check (weight_kg between 20 and 400),
+  photo_key text,
+  logged_at timestamptz not null default now()
+);
+create index if not exists weight_log_user_logged_idx on public.weight_log (user_id, logged_at desc);
+
+-- Seed history for profiles created before weight_log existed: their onboarding weight.
+insert into public.weight_log (user_id, weight_kg, logged_at)
+select p.user_id, p.weight, p.created_at from public.profile p
+where p.weight is not null
+  and not exists (select 1 from public.weight_log w where w.user_id = p.user_id);
+
+-- One row per user, local day and habit; amount is ml of water or 1 for a completed workout.
+create table if not exists public.habit_log (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null default (auth.user_id())::uuid
+    references neon_auth."user"(id) on delete cascade,
+  day date not null,
+  habit text not null check (habit in ('water', 'workout')),
+  amount numeric not null default 0 check (amount >= 0),
+  updated_at timestamptz not null default now(),
+  unique (user_id, day, habit)
+);
+
+grant select, insert, update, delete on public.weight_log, public.habit_log to authenticated;
+revoke all on public.weight_log, public.habit_log from anonymous;
+
+alter table public.weight_log enable row level security;
+alter table public.habit_log enable row level security;
+
+drop policy if exists weight_log_owner on public.weight_log;
+create policy weight_log_owner on public.weight_log for all to authenticated
+  using (user_id = (select auth.user_id())::uuid)
+  with check (user_id = (select auth.user_id())::uuid);
+
+drop policy if exists habit_log_owner on public.habit_log;
+create policy habit_log_owner on public.habit_log for all to authenticated
+  using (user_id = (select auth.user_id())::uuid)
+  with check (user_id = (select auth.user_id())::uuid);
+
+-- Streaks and XP for the signed-in user, with days counted in the caller's time zone.
+-- A day counts towards the streak when at least one meal was logged.
+-- XP: 10 per meal, 50 per day within 10% of the calorie target, 20 per weight
+-- check-in, 25 per workout. Each level takes 1000 XP. Call via POST /rpc/user_stats.
+-- Security definer because `authenticated` can't use the auth schema directly; every
+-- query below is filtered to the caller's own user id.
+create or replace function public.user_stats(tz text default 'UTC') returns json
+language sql stable security definer set search_path = public as $$
+  with me as (
+    select (auth.user_id())::uuid as uid,
+           (now() at time zone tz)::date as today
+  ),
+  target as (
+    select p.daily_calorie_target as kcal from profile p, me where p.user_id = me.uid
+  ),
+  meal_days as (
+    select (m.created_at at time zone tz)::date as d,
+           count(*) as meals,
+           sum(coalesce((m.analysis_json->>'calories')::numeric, 0)) as kcal
+    from meal m, me
+    where m.user_id = me.uid and not m.is_deleted
+    group by 1
+  ),
+  runs as (
+    select min(d) as first_day, max(d) as last_day, count(*) as len
+    from (select d, d - (row_number() over (order by d))::int as grp from meal_days) g
+    group by grp
+  ),
+  totals as (
+    select
+      coalesce((select sum(meals) from meal_days), 0) as meals,
+      coalesce((select count(*) from meal_days md, target t
+                where t.kcal > 0 and md.kcal between t.kcal * 0.9 and t.kcal * 1.1), 0) as days_on_target,
+      (select count(*) from weight_log w, me where w.user_id = me.uid) as weigh_ins,
+      (select count(*) from habit_log h, me
+        where h.user_id = me.uid and h.habit = 'workout' and h.amount > 0) as workouts
+  )
+  select json_build_object(
+    'current_streak', coalesce((select len from runs, me where last_day >= me.today - 1), 0),
+    'best_streak', coalesce((select max(len) from runs), 0),
+    'logged_today', exists (select 1 from meal_days, me where d = me.today),
+    'days_logged', (select count(*) from meal_days),
+    'meals_logged', t.meals,
+    'days_on_target', t.days_on_target,
+    'weigh_ins', t.weigh_ins,
+    'workouts', t.workouts,
+    'xp', t.meals * 10 + t.days_on_target * 50 + t.weigh_ins * 20 + t.workouts * 25
+  )
+  from totals t
+$$;
+
+revoke all on function public.user_stats(text) from public, anonymous;
+grant execute on function public.user_stats(text) to authenticated;
+
+commit;
+
+notify pgrst, 'reload schema';
+
+-- ---------------------------------------------------------------------------
+-- Credits are enforced server-side: /api/analyze-meal checks the balance before running
+-- the AI and spends a credit only when the analysis succeeds. Clients can no longer write
+-- the ledger directly.
+-- ---------------------------------------------------------------------------
+begin;
+
+drop policy if exists credit_tx_insert_spend on public.credit_transaction;
+revoke insert on public.credit_transaction from authenticated;
+
+-- The caller's balance (sum of the ledger).
+create or replace function public.credit_balance() returns integer
+language sql stable security definer set search_path = public as $$
+  select coalesce(sum(amount), 0)::integer from credit_transaction
+  where user_id = (auth.user_id())::uuid
+$$;
+
+-- Spends one credit if the caller has one. Returns the new balance, or -1 when the
+-- balance is empty (nothing is written then).
+create or replace function public.spend_credit(reference text default null) returns integer
+language plpgsql security definer set search_path = public as $$
+declare
+  uid uuid := (auth.user_id())::uuid;
+  balance integer;
+begin
+  if uid is null then
+    raise exception 'not authenticated';
+  end if;
+
+  perform pg_advisory_xact_lock(hashtext(uid::text));
+  select coalesce(sum(amount), 0) into balance from credit_transaction where user_id = uid;
+  if balance < 1 then
+    return -1;
+  end if;
+
+  insert into credit_transaction (user_id, amount, type, reference_id) values (uid, -1, 'used', reference);
+  return balance - 1;
+end $$;
+
+revoke all on function public.credit_balance(), public.spend_credit(text) from public, anonymous;
+grant execute on function public.credit_balance(), public.spend_credit(text) to authenticated;
+
+commit;
+
+notify pgrst, 'reload schema';
+
+-- ---------------------------------------------------------------------------
+-- Marketing: consent lives on the profile; marketing_contacts is the export for
+-- campaigns. Emails themselves live in neon_auth."user" (managed by Neon Auth).
+-- ---------------------------------------------------------------------------
+begin;
+
+alter table public.profile add column if not exists marketing_opt_in boolean not null default false;
+alter table public.profile add column if not exists marketing_opt_in_at timestamptz;
+
+-- Records when consent was given (and clears it when withdrawn), so it can't be faked
+-- from the client.
+create or replace function public.set_marketing_opt_in_at() returns trigger
+language plpgsql as $$
+begin
+  if new.marketing_opt_in and (tg_op = 'INSERT' or not old.marketing_opt_in) then
+    new.marketing_opt_in_at := now();
+  elsif not new.marketing_opt_in then
+    new.marketing_opt_in_at := null;
+  elsif tg_op = 'UPDATE' then
+    new.marketing_opt_in_at := old.marketing_opt_in_at;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists profile_marketing_opt_in on public.profile;
+create trigger profile_marketing_opt_in before insert or update on public.profile
+  for each row execute function public.set_marketing_opt_in_at();
+
+-- One row per user with what a campaign needs; filter on marketing_opt_in before
+-- sending anything. Not exposed to the app: owner/admin access only.
+create or replace view public.marketing_contacts as
+select
+  u.id as user_id,
+  u.email,
+  u.name,
+  u."emailVerified" as email_verified,
+  u."createdAt" as signed_up_at,
+  (select string_agg(distinct a."providerId", ',') from neon_auth.account a where a."userId" = u.id) as sign_in_methods,
+  coalesce(p.marketing_opt_in, false) as marketing_opt_in,
+  p.marketing_opt_in_at,
+  p.goal,
+  p.gender,
+  p.age,
+  p.activity_level,
+  p.daily_calorie_target,
+  (p.user_id is not null) as completed_onboarding,
+  m.meals_logged,
+  m.last_meal_at
+from neon_auth."user" u
+left join public.profile p on p.user_id = u.id
+left join lateral (
+  select count(*) as meals_logged, max(created_at) as last_meal_at
+  from public.meal where user_id = u.id and not is_deleted
+) m on true;
+
+revoke all on public.marketing_contacts from public, anonymous, authenticated;
+
+commit;
+
 notify pgrst, 'reload schema';

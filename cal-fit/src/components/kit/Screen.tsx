@@ -1,14 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
 import { ReactNode } from 'react';
 import { Pressable, ScrollView, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
 import { SafeAreaView, Edge } from 'react-native-safe-area-context';
 
 import { colors, screenPadding } from '@/constants/design';
+import { goBack } from '@/lib/navigation';
 
 interface ScreenProps {
   children: ReactNode;
-  /** Show the back chevron; defaults to router.back(). */
+  /** Show the back chevron; defaults to goBack(). */
   onBack?: (() => void) | true;
   /** Wrap content in a ScrollView. */
   scroll?: boolean;
@@ -29,7 +29,7 @@ export function Screen({
   edges = ['top', 'bottom'],
   contentStyle,
 }: ScreenProps) {
-  const back = onBack === true ? () => router.back() : onBack;
+  const back = onBack === true ? () => goBack() : onBack;
 
   const body = scroll ? (
     <ScrollView

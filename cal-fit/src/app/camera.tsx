@@ -4,18 +4,19 @@ import { router } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { ResultSheet } from '@/components/camera/ResultSheet';
+import { ResultSheet, SaveOverrides } from '@/components/camera/ResultSheet';
 import { ScanningCard } from '@/components/camera/ScanningCard';
 import { PrimaryButton, SecondaryButton } from '@/components/kit';
 import { colors, fonts, radius, screenPadding } from '@/constants/design';
 import { useCamera } from '@/contexts/CameraContext';
+import { nextCreditRenewal } from '@/hooks/useCredits';
 import { mealTitle, useMealAnalysis } from '@/hooks/useMealAnalysis';
 
 const placeholderPhoto = require('../../design/food_photo.jpg');
 
 /** AI Meal Camera (design #15) with the AI Result Modal (design #16) as a bottom sheet. */
 export default function CameraScreen() {
-  const { imageUri, pickFromCamera, pickFromCameraRoll, clearImage } = useCamera();
+  const { imageUri, isPreparing, pickError, pickFromCamera, pickFromCameraRoll, clearImage } = useCamera();
   const { status, credits, analysis, error, insufficientCredits, saveToDiary, isSaving, saveError } =
     useMealAnalysis(imageUri);
 
@@ -30,8 +31,16 @@ export default function CameraScreen() {
     }
   }
 
-  async function handleSave() {
-    if (await saveToDiary()) {
+  const renewalLabel = nextCreditRenewal().toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+  // The camera is a full-screen modal; swap it for the manual entry modal.
+  function logManually() {
+    clearImage();
+    router.replace('/log-food');
+  }
+
+  async function handleSave(overrides: SaveOverrides) {
+    if (await saveToDiary(overrides)) {
       close();
     }
   }
@@ -67,17 +76,38 @@ export default function CameraScreen() {
               </Text>
               {credits !== null && (
                 <View style={styles.creditsPill}>
-                  <Ionicons name="sparkles" size={14} color={colors.white} />
+                  <Ionicons name="sparkles" size={14} color={credits > 0 ? colors.white : colors.amber} />
                   <Text style={styles.creditsText}>
-                    {credits} {credits === 1 ? 'credit' : 'credits'} left
+                    {credits > 0
+                      ? `${credits} ${credits === 1 ? 'scan' : 'scans'} left`
+                      : `No scans left • more on ${renewalLabel}`}
                   </Text>
                 </View>
+              )}
+              {credits === 0 && (
+                <Text style={styles.pickSubtitle}>
+                  Photos you&apos;ve scanned before are still free, and manual logging always is.
+                </Text>
               )}
             </View>
 
             <View style={styles.pickActions}>
-              <PrimaryButton title="Take Photo" icon="camera" onPress={pickFromCamera} />
-              <SecondaryButton title="Choose from Gallery" icon="images-outline" onPress={pickFromCameraRoll} />
+              {pickError && (
+                <View style={styles.pickError}>
+                  <Ionicons name="alert-circle" size={18} color={colors.amber} />
+                  <Text style={styles.pickErrorText}>{pickError}</Text>
+                </View>
+              )}
+              <PrimaryButton title="Take Photo" icon="camera" onPress={pickFromCamera} disabled={isPreparing} />
+              <SecondaryButton
+                title={isPreparing ? 'Preparing photo…' : 'Choose from Gallery'}
+                icon="images-outline"
+                onPress={pickFromCameraRoll}
+                disabled={isPreparing}
+              />
+              <Pressable onPress={logManually} accessibilityRole="button" hitSlop={8} style={styles.manualLink}>
+                <Text style={styles.manualLinkText}>Log food manually instead</Text>
+              </Pressable>
             </View>
           </View>
         )}
@@ -95,10 +125,14 @@ export default function CameraScreen() {
               <Text style={styles.errorTitle}>{insufficientCredits ? 'Out of credits' : 'Analysis failed'}</Text>
               <Text style={styles.errorMessage}>{error}</Text>
               <View style={styles.errorActions}>
-                {insufficientCredits && (
-                  <PrimaryButton title="Buy Credits" icon="sparkles" onPress={() => router.push('/paywall')} />
+                {insufficientCredits ? (
+                  <>
+                    <PrimaryButton title="Log Food Manually" icon="create-outline" onPress={logManually} />
+                    <SecondaryButton title="View Plan" onPress={() => router.push('/paywall')} />
+                  </>
+                ) : (
+                  <SecondaryButton title="Try Another Photo" onPress={clearImage} />
                 )}
-                <SecondaryButton title="Try Another Photo" onPress={clearImage} />
               </View>
             </View>
           </View>
@@ -192,8 +226,33 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.white,
   },
+  manualLink: {
+    alignSelf: 'center',
+    paddingVertical: 6,
+  },
+  manualLinkText: {
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: colors.white,
+    textDecorationLine: 'underline',
+  },
   pickActions: {
     gap: 12,
+  },
+  pickError: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    padding: 12,
+    borderRadius: radius.md,
+    backgroundColor: colors.darkOverlay,
+  },
+  pickErrorText: {
+    flex: 1,
+    fontFamily: fonts.medium,
+    fontSize: 13,
+    lineHeight: 18,
+    color: colors.white,
   },
   centered: {
     flex: 1,
@@ -232,6 +291,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
+    maxHeight: '92%',
     width: '100%',
     maxWidth: 520,
     alignSelf: 'center',

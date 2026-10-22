@@ -33,7 +33,7 @@ export type ActivityLevel = (typeof ACTIVITY_LEVELS)[number]['value'];
 export type GymExperience = (typeof GYM_EXPERIENCE)[number]['value'];
 export type Goal = (typeof GOALS)[number]['value'];
 
-/** The design's onboarding has no age step, so targets assume this age. */
+/** Fallback age for profiles created before onboarding asked for it. */
 export const DEFAULT_AGE = 25;
 
 /** Macro split shown on the Calorie Target Result screen (share of calories). */
@@ -101,4 +101,27 @@ export function startOfToday(): string {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
   return d.toISOString();
+}
+
+/** A date as a local YYYY-MM-DD day key (matches habit_log.day and user_stats' tz). */
+export function localDay(date: Date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+/** Daily water goal; each tap on the home task logs one glass. */
+export const WATER_GOAL_ML = 2500;
+export const WATER_GLASS_ML = 250;
+
+/** XP needed per level (XP rules live in user_stats, db/schema.sql). */
+export const XP_PER_LEVEL = 1000;
+
+export function levelFor(xp: number) {
+  return {
+    level: Math.floor(xp / XP_PER_LEVEL) + 1,
+    progress: (xp % XP_PER_LEVEL) / XP_PER_LEVEL,
+    toNext: XP_PER_LEVEL - (xp % XP_PER_LEVEL),
+  };
 }

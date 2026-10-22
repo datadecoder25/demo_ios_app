@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { useUser } from '@/contexts/UserContext';
-import { AiAnalysisResponse, triggerAiAnalysis } from '@/lib/ai';
-import { ANALYSIS_CREDIT_COST, creditTransactionApi, imageCacheApi, mealApi } from '@/lib/db';
+import { nextCreditRenewal } from '@/hooks/useCredits';
+import { AiAnalysisResponse, NoCreditsError, triggerAiAnalysis } from '@/lib/ai';
+import { scaleNutrients } from '@/components/foods/types';
+import { ANALYSIS_CREDIT_COST, creditTransactionApi, imageCacheApi, mealApi, MealType } from '@/lib/db';
 
 export type AnalysisStatus = 'idle' | 'scanning' | 'done' | 'error';
 
@@ -14,6 +16,12 @@ interface AnalysisResult {
   error?: string;
   insufficientCredits?: boolean;
 }
+
+const NO_CREDITS_MESSAGE = () =>
+  `You've used this month's free AI scans. They renew on ${nextCreditRenewal().toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+  })}, and manual logging is always free.`;
 
 async function sumCredits(userId: string): Promise<number | null> {
   const { data } = await creditTransactionApi.getByUserId(userId);
@@ -86,25 +94,27 @@ export function useMealAnalysis(imageUri: string | null) {
           return;
         }
 
+        // Checked here to skip a pointless upload; the server enforces it either way.
         const balance = (await sumCredits(user.id)) ?? 0;
         setCredits(balance);
         if (balance < ANALYSIS_CREDIT_COST) {
-          setResult({
-            uri,
-            error: 'You are out of credits. Get more to keep scanning meals.',
-            insufficientCredits: true,
-          });
+          setResult({ uri, error: NO_CREDITS_MESSAGE(), insufficientCredits: true });
           return;
         }
 
-        const { analysis, photoKey } = await triggerAiAnalysis(uri);
-        await creditTransactionApi.deductCredits(user.id, ANALYSIS_CREDIT_COST, photoKey);
+        // The server spends the credit once the analysis succeeds.
+        const { analysis, photoKey, creditsLeft } = await triggerAiAnalysis(uri);
         await imageCacheApi.create(photoKey, hash, analysis);
 
-        setCredits(balance - ANALYSIS_CREDIT_COST);
+        setCredits(creditsLeft);
         setResult({ uri, analysis, photoKey });
       } catch (err) {
         console.error('Analysis error:', err);
+        if (err instanceof NoCreditsError) {
+          setCredits(0);
+          setResult({ uri, error: NO_CREDITS_MESSAGE(), insufficientCredits: true });
+          return;
+        }
         setResult({
           uri,
           error: err instanceof Error ? err.message : 'Failed to analyze meal. Please try again.',
@@ -118,17 +128,34 @@ export function useMealAnalysis(imageUri: string | null) {
   const current = imageUri && result?.uri === imageUri ? result : null;
   const status: AnalysisStatus = !imageUri ? 'idle' : !current ? 'scanning' : current.error ? 'error' : 'done';
 
-  async function saveToDiary(): Promise<boolean> {
+  /** Saves the analyzed meal, with the user's name, meal type and portion (scales the estimate). */
+  async function saveToDiary(overrides?: { name?: string; mealType?: MealType; portion?: number }): Promise<boolean> {
     if (!user || !current?.analysis) return false;
+
+    const analysis = current.analysis;
+    const portion = overrides?.portion && overrides.portion > 0 ? overrides.portion : 1;
+    const scaled =
+      portion === 1
+        ? analysis
+        : {
+            ...analysis,
+            ...scaleNutrients(
+              { calories: analysis.calories, protein: analysis.protein, carbs: analysis.carbs, fat: analysis.fat, fiber: analysis.fiber ?? 0 },
+              portion
+            ),
+            // Kept so the original AI estimate can be recovered.
+            portion,
+          };
 
     setIsSaving(true);
     setSaveError(null);
     const { data, error } = await mealApi.create({
       user_id: user.id,
       photo_url: current.photoKey ?? null,
-      analysis_json: current.analysis,
+      analysis_json: scaled,
       is_manual: false,
-      manual_name: mealTitle(current.analysis),
+      manual_name: overrides?.name?.trim() || mealTitle(analysis),
+      meal_type: overrides?.mealType ?? null,
     });
     setIsSaving(false);
 

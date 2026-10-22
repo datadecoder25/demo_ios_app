@@ -60,12 +60,13 @@ export function SecondaryButton({ title, onPress, disabled, icon, style }: Butto
 }
 
 /** Outlined row button with a leading icon (Continue with Google / Apple). */
-export function SocialButton({ title, onPress, icon, iconColor }: ButtonProps & { iconColor?: string }) {
+export function SocialButton({ title, onPress, icon, iconColor, disabled }: ButtonProps & { iconColor?: string }) {
   return (
     <Pressable
       onPress={onPress}
+      disabled={disabled}
       accessibilityRole="button"
-      style={({ pressed }) => [styles.social, pressed && styles.pressed]}
+      style={({ pressed }) => [styles.social, pressed && styles.pressed, disabled && styles.inactive]}
     >
       {icon && <Ionicons name={icon} size={22} color={iconColor ?? colors.navy} style={styles.socialIcon} />}
       <Text style={styles.socialText}>{title}</Text>

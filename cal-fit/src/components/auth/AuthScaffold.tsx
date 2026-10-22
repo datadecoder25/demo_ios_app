@@ -1,10 +1,10 @@
-import { router } from 'expo-router';
-import { ReactNode } from 'react';
+import { ReactNode, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { LogoMark, OrDivider, Screen, SocialButton } from '@/components/kit';
 import { colors, fonts, type } from '@/constants/design';
-import { Alert } from '@/lib/alert';
+import { isSocialSignInSupported, signInWithSocial } from '@/lib/auth';
+import { goBack } from '@/lib/navigation';
 
 interface AuthScaffoldProps {
   title: string;
@@ -13,25 +13,67 @@ interface AuthScaffoldProps {
   footerPrompt: string;
   footerAction: string;
   onFooterPress: () => void;
+  /** Message shown above the social buttons, e.g. a failed Google sign-in. */
+  socialError?: string | null;
+  /** Show "Continue with Google"; off for screens like Reset Password. */
+  showSocial?: boolean;
 }
 
-function goBack() {
-  if (router.canGoBack()) {
-    router.back();
-  } else {
-    router.replace('/welcome');
+const backToWelcome = () => goBack('/welcome');
+
+/**
+ * "Continue with Google" (web only). Apple isn't offered: Neon Auth doesn't support it.
+ */
+function SocialSignIn({ initialError }: { initialError?: string | null }) {
+  const [error, setError] = useState<string | null>(null);
+  const [isStarting, setIsStarting] = useState(false);
+
+  if (!isSocialSignInSupported) return null;
+
+  async function start() {
+    setError(null);
+    setIsStarting(true);
+    try {
+      await signInWithSocial('google');
+      // The page is navigating to Google; leave the button disabled.
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not start Google sign-in.');
+      setIsStarting(false);
+    }
   }
+
+  return (
+    <View style={styles.social}>
+      <OrDivider />
+      <SocialButton
+        title={isStarting ? 'Opening Google…' : 'Continue with Google'}
+        icon="logo-google"
+        iconColor="#DB4437"
+        onPress={start}
+        disabled={isStarting}
+      />
+      <FormError message={error ?? initialError ?? null} />
+    </View>
+  );
 }
 
-function comingSoon(provider: string) {
-  Alert.alert('Coming soon', `${provider} sign-in will be available in a future update.`);
-}
-
-/** Shared layout for Sign In / Sign Up (design #3, #4): logo, title, form, social buttons, footer link. */
-export function AuthScaffold({ title, subtitle, children, footerPrompt, footerAction, onFooterPress }: AuthScaffoldProps) {
+/**
+ * Shared layout for Sign In / Sign Up / Reset Password (design #3, #4): logo, title, form,
+ * Google sign-in, footer link.
+ */
+export function AuthScaffold({
+  title,
+  subtitle,
+  children,
+  footerPrompt,
+  footerAction,
+  onFooterPress,
+  socialError,
+  showSocial = true,
+}: AuthScaffoldProps) {
   return (
     <KeyboardAvoidingView style={styles.fill} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <Screen onBack={goBack} scroll>
+      <Screen onBack={backToWelcome} scroll>
         <View style={styles.logo}>
           <LogoMark size={44} />
         </View>
@@ -40,16 +82,7 @@ export function AuthScaffold({ title, subtitle, children, footerPrompt, footerAc
 
         <View style={styles.form}>{children}</View>
 
-        <View style={styles.social}>
-          <OrDivider />
-          <SocialButton
-            title="Continue with Google"
-            icon="logo-google"
-            iconColor="#4285F4"
-            onPress={() => comingSoon('Google')}
-          />
-          <SocialButton title="Continue with Apple" icon="logo-apple" onPress={() => comingSoon('Apple')} />
-        </View>
+        {showSocial && <SocialSignIn initialError={socialError} />}
 
         <View style={styles.footer}>
           <Text style={styles.footerText}>{footerPrompt} </Text>
@@ -68,9 +101,27 @@ export function FormError({ message }: { message: string | null }) {
   return <Text style={styles.error}>{message}</Text>;
 }
 
+/** Inline success message under the form (e.g. "reset link sent"). */
+export function FormNotice({ message }: { message: string | null }) {
+  if (!message) return null;
+  return <Text style={styles.notice}>{message}</Text>;
+}
+
+/** Basic shape check; the server does the real validation. */
+export function isValidEmail(email: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+/** Neon Auth (Better Auth) rejects passwords shorter than this. */
+export const MIN_PASSWORD_LENGTH = 8;
+
 const styles = StyleSheet.create({
   fill: {
     flex: 1,
+  },
+  social: {
+    gap: 14,
+    marginTop: 18,
   },
   logo: {
     alignItems: 'center',
@@ -90,10 +141,6 @@ const styles = StyleSheet.create({
   form: {
     marginTop: 28,
     gap: 14,
-  },
-  social: {
-    marginTop: 22,
-    gap: 12,
   },
   footer: {
     flexDirection: 'row',
@@ -115,6 +162,13 @@ const styles = StyleSheet.create({
     fontFamily: fonts.medium,
     fontSize: 13,
     color: colors.danger,
+    textAlign: 'center',
+  },
+  notice: {
+    fontFamily: fonts.medium,
+    fontSize: 13,
+    lineHeight: 18,
+    color: colors.success,
     textAlign: 'center',
   },
 });

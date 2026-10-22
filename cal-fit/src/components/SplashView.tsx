@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { LogoMark } from '@/components/kit';
 import { colors } from '@/constants/design';
@@ -7,7 +7,7 @@ import { colors } from '@/constants/design';
  * Splash screen (design #1). Rendered while fonts and the session load, so it uses
  * system fonts rather than Plus Jakarta Sans.
  */
-export function SplashView() {
+export function SplashView({ error, onRetry }: { error?: string | null; onRetry?: () => void }) {
   return (
     <View style={styles.container}>
       <View style={[styles.blob, styles.blobTop]} />
@@ -20,12 +20,47 @@ export function SplashView() {
         <Text style={styles.tagline}>Be Your Best</Text>
       </View>
 
-      <Text style={styles.powered}>Powered by AI</Text>
+      {error ? (
+        <View style={styles.errorBox}>
+          <Text style={styles.errorText}>{error}</Text>
+          {onRetry && (
+            <Pressable onPress={onRetry} accessibilityRole="button" style={styles.retry}>
+              <Text style={styles.retryText}>Try again</Text>
+            </Pressable>
+          )}
+        </View>
+      ) : (
+        <Text style={styles.powered}>Powered by AI</Text>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  errorBox: {
+    position: 'absolute',
+    bottom: 48,
+    left: 24,
+    right: 24,
+    alignItems: 'center',
+    gap: 12,
+  },
+  errorText: {
+    fontSize: 14,
+    color: colors.navy,
+    textAlign: 'center',
+  },
+  retry: {
+    backgroundColor: colors.primary,
+    borderRadius: 999,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+  },
+  retryText: {
+    color: colors.white,
+    fontSize: 15,
+    fontWeight: '600',
+  },
   container: {
     flex: 1,
     backgroundColor: colors.surface,

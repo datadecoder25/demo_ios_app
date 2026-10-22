@@ -1,11 +1,13 @@
 /**
- * Static food catalog for the Foods tab (placeholder until a real food database exists).
- * Values are per serving.
+ * Common meals with typical per-serving values, shown on the Foods tab when the search box is
+ * empty. Real products come from the Open Food Facts search (/api/foods-search).
  */
+
+import type { FoodDraft } from './types';
 
 export type FoodCategory = 'breakfast' | 'lunch' | 'dinner' | 'snacks' | 'shakes';
 
-export interface SampleFood {
+export interface CommonFood {
   id: string;
   name: string;
   emoji: string;
@@ -25,7 +27,7 @@ export const FOOD_CATEGORIES = [
   { label: 'Shakes', value: 'shakes' },
 ] as const satisfies readonly { label: string; value: FoodCategory }[];
 
-export const SAMPLE_FOODS: Record<FoodCategory, SampleFood[]> = {
+export const COMMON_FOODS: Record<FoodCategory, CommonFood[]> = {
   breakfast: [
     { id: 'oats-bowl', name: 'Oats Bowl', emoji: '🥣', tint: '#FFF4E5', calories: 420, protein: 20, carbs: 62, fat: 11, fiber: 9 },
     { id: 'greek-yogurt', name: 'Greek Yogurt & Berries', emoji: '🫐', tint: '#EEF0FF', calories: 380, protein: 25, carbs: 48, fat: 9, fiber: 6 },
@@ -62,3 +64,13 @@ export const SAMPLE_FOODS: Record<FoodCategory, SampleFood[]> = {
     { id: 'mango-lassi', name: 'Mango Protein Lassi', emoji: '🥭', tint: '#FFF1E0', calories: 380, protein: 24, carbs: 56, fat: 7, fiber: 2 },
   ],
 };
+
+export function draftFromCommon(food: CommonFood): FoodDraft {
+  return {
+    name: food.name,
+    source: 'common',
+    servingLabel: '1 serving',
+    servingGrams: null,
+    nutrients: { calories: food.calories, protein: food.protein, carbs: food.carbs, fat: food.fat, fiber: food.fiber },
+  };
+}

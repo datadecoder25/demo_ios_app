@@ -1,15 +1,17 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { router } from 'expo-router';
+import { useState } from 'react';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { Card, Chips, IconCircle, ProgressBar } from '@/components/kit';
-import { BarChart, LineChart, StreakDots } from '@/components/progress/Charts';
+import { Card, Chips, IconCircle, PrimaryButton, ProgressBar } from '@/components/kit';
+import { BarChart, LineChart, StreakDay, StreakDots } from '@/components/progress/Charts';
+import { shortDate, signedKg, useProgressData } from '@/components/progress/useProgressData';
 import { colors, fonts, screenPadding, type } from '@/constants/design';
 import { useUser } from '@/contexts/UserContext';
-import { mealApi } from '@/lib/db';
-import { DailyTargets, macrosFor, sumMeals } from '@/lib/nutrition';
+import { useStats } from '@/hooks/useStats';
+import { Alert } from '@/lib/alert';
+import { macrosFor, sumMeals } from '@/lib/nutrition';
 
 type View_ = 'weight' | 'calories' | 'macros' | 'streaks';
 
@@ -20,87 +22,69 @@ const VIEWS = [
   { label: 'Streaks', value: 'streaks' },
 ] as const satisfies readonly { label: string; value: View_ }[];
 
-// SAMPLE: no weight history or streak tracking exists yet.
-const SAMPLE_WEIGHT_DELTAS = [-3.5, -3, -2.6, -2, -1.4, -0.9, -0.4, 0];
-const SAMPLE_WEIGHT_LABELS = ['W1', 'W2', 'W3', 'W4', 'W5', 'W6', 'W7', 'Now'];
-const SAMPLE_STREAK: ('done' | 'today' | 'upcoming')[] = [
-  ...Array<'done'>(13).fill('done'),
-  'today',
-  'upcoming',
-];
+/** Check-ins shown under the weight chart. */
+const RECENT_CHECK_INS = 5;
 
-interface Week {
-  labels: string[];
-  calories: number[];
-  today: DailyTargets;
-}
-
-/** Midnight six days ago, so the window covers the last seven local days including today. */
-function weekStart(): Date {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() - 6);
-  return d;
+/** Up to three evenly spaced date labels for the weight chart's x axis. */
+function axisLabels(dates: string[]): string[] {
+  if (dates.length <= 3) return dates.map(d => shortDate(d));
+  return [dates[0], dates[Math.floor((dates.length - 1) / 2)], dates[dates.length - 1]].map(d => shortDate(d));
 }
 
 export default function ProgressScreen() {
-  const { user, profile } = useUser();
+  const { profile, deleteWeightLog } = useUser();
+  const { data, error, reload } = useProgressData();
+  const { stats, reload: reloadStats } = useStats();
   const [view, setView] = useState<View_>('weight');
-  const [week, setWeek] = useState<Week | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const target = profile?.daily_calorie_target ?? 2500;
-  const currentWeight = Number(profile?.weight) || 62;
+  const target = profile?.daily_calorie_target ?? 0;
+  const weights = data?.weights ?? [];
+  const first = weights[0];
+  const latest = weights[weights.length - 1];
+  const currentWeight = latest?.weight_kg ?? (profile?.weight != null ? Number(profile.weight) : null);
 
-  useFocusEffect(
-    useCallback(() => {
-      if (!user) return;
-      let active = true;
+  async function onRefresh() {
+    setRefreshing(true);
+    await Promise.all([reload(), reloadStats()]);
+    setRefreshing(false);
+  }
 
-      async function loadWeek() {
-        if (!user) return;
-        const start = weekStart();
-        const { data } = await mealApi.getSince(user.id, start.toISOString());
-        if (!active) return;
+  function confirmDelete(id: string, label: string) {
+    Alert.alert('Remove check-in', `Remove the check-in from ${label}?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await deleteWeightLog(id);
+          } catch {
+            Alert.alert('Error', 'Could not remove this check-in. Please try again.');
+          }
+          await Promise.all([reload(), reloadStats()]);
+        },
+      },
+    ]);
+  }
 
-        const days = Array.from({ length: 7 }, (_, i) => {
-          const d = new Date(start);
-          d.setDate(start.getDate() + i);
-          return d;
-        });
-        const meals = data ?? [];
-        const perDay = days.map(day =>
-          meals.filter(m => new Date(m.created_at).toDateString() === day.toDateString())
-        );
-
-        setWeek({
-          labels: days.map(d => d.toLocaleDateString('en-US', { weekday: 'short' })),
-          calories: perDay.map(dayMeals => Math.round(sumMeals(dayMeals).calories)),
-          today: sumMeals(perDay[6]),
-        });
-      }
-
-      loadWeek();
-      return () => {
-        active = false;
-      };
-    }, [user])
-  );
-
-  const calories = week?.calories ?? Array(7).fill(0);
-  const labels = week?.labels ?? ['', '', '', '', '', '', ''];
-  const daysOnTarget = calories.filter(c => c >= target * 0.9).length;
+  // Calorie chart: the last 7 days.
+  const week = data?.days.slice(-7) ?? [];
+  const calories = week.length ? week.map(d => d.calories) : Array(7).fill(0);
+  const labels = week.length ? week.map(d => d.date.toLocaleDateString('en-US', { weekday: 'short' })) : Array(7).fill('');
+  const daysOnTarget = target > 0 ? calories.filter(c => c >= target * 0.9 && c <= target * 1.1).length : 0;
   const consistency = Math.round((daysOnTarget / 7) * 100);
-
-  const weights = SAMPLE_WEIGHT_DELTAS.map(d => Math.round((currentWeight + d) * 10) / 10);
 
   const consistencyCard = (barHeight: number) => (
     <Card>
       <View style={styles.cardHeader}>
         <Text style={styles.cardTitle}>Calorie Consistency</Text>
-        <Text style={styles.cardValue}>{consistency}%</Text>
+        <Text style={styles.cardValue}>{target > 0 ? `${consistency}%` : '–'}</Text>
       </View>
       <Text style={styles.cardHint}>
-        {daysOnTarget}/7 days within 10% of your {target.toLocaleString()} kcal target
+        {target > 0
+          ? `${daysOnTarget}/7 days within 10% of your ${target.toLocaleString()} kcal target`
+          : 'Set up your profile to get a daily calorie target'}
       </Text>
       <View style={styles.chartGap}>
         <BarChart values={calories} labels={labels} target={target} height={barHeight} />
@@ -108,20 +92,90 @@ export default function ProgressScreen() {
     </Card>
   );
 
+  const streakDays: StreakDay[] = (data?.days ?? []).map((d, i, all) => ({
+    label: String(d.date.getDate()),
+    state: d.meals.length > 0 ? 'done' : i === all.length - 1 ? 'today' : 'missed',
+  }));
+  const streak = stats?.current_streak ?? 0;
+
   const streakCard = (
     <Card>
       <View style={styles.cardHeader}>
         <Text style={styles.cardTitle}>Streak Calendar</Text>
-        <Text style={styles.cardMeta}>14 days</Text>
+        <Text style={styles.cardMeta}>
+          {stats ? `${streak} ${streak === 1 ? 'day' : 'days'} • best ${stats.best_streak}` : '–'}
+        </Text>
       </View>
+      <Text style={styles.cardHint}>
+        {!stats
+          ? ' '
+          : stats.logged_today
+          ? 'Today is logged. Keep it going tomorrow!'
+          : streak > 0
+            ? 'Log a meal today to keep your streak alive.'
+            : 'Log a meal to start a streak.'}
+      </Text>
       <View style={styles.chartGap}>
-        <StreakDots days={SAMPLE_STREAK} />
+        {streakDays.length > 0 && <StreakDots days={streakDays} />}
       </View>
     </Card>
   );
 
+  const weightCard = (
+    <Card>
+      <View style={styles.cardHeader}>
+        <Text style={styles.cardTitle}>Weight</Text>
+        <Text style={styles.cardValue}>{currentWeight != null ? `${currentWeight} kg` : '–'}</Text>
+      </View>
+      {weights.length >= 2 && first && latest ? (
+        <>
+          <Text style={styles.cardHint}>
+            {signedKg(latest.weight_kg - first.weight_kg)} kg since {shortDate(first.logged_at)}
+            {profile?.goal_weight ? ` • goal ${Number(profile.goal_weight)} kg` : ''}
+          </Text>
+          <View style={styles.chartGap}>
+            <LineChart values={weights.map(w => w.weight_kg)} labels={axisLabels(weights.map(w => w.logged_at))} />
+          </View>
+        </>
+      ) : (
+        <Text style={styles.cardHint}>
+          {weights.length === 1
+            ? 'Log your weight again to see your trend.'
+            : 'Log your weight to start tracking your trend.'}
+        </Text>
+      )}
+      <PrimaryButton title="Log Weight" icon="add" onPress={() => router.push('/check-in')} style={styles.chartGap} />
+      {weights.length > 0 && (
+        <View style={styles.checkIns}>
+          {weights
+            .slice(-RECENT_CHECK_INS)
+            .reverse()
+            .map(w => (
+              <View key={w.id} style={styles.checkInRow}>
+                <Ionicons
+                  name={w.photo_key ? 'image-outline' : 'scale-outline'}
+                  size={16}
+                  color={colors.textMuted}
+                />
+                <Text style={styles.checkInDate}>{shortDate(w.logged_at)}</Text>
+                <Text style={styles.checkInWeight}>{w.weight_kg} kg</Text>
+                <Pressable
+                  onPress={() => confirmDelete(w.id, shortDate(w.logged_at))}
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove check-in from ${shortDate(w.logged_at)}`}
+                >
+                  <Ionicons name="trash-outline" size={16} color={colors.textMuted} />
+                </Pressable>
+              </View>
+            ))}
+        </View>
+      )}
+    </Card>
+  );
+
   const macroTargets = macrosFor(target);
-  const today = week?.today ?? { calories: 0, protein: 0, carbs: 0, fat: 0 };
+  const today = sumMeals(data?.days[data.days.length - 1]?.meals ?? []);
   const macroRows = [
     { label: 'Calories', value: today.calories, goal: target, unit: 'kcal', color: colors.primary },
     { label: 'Protein', value: today.protein, goal: macroTargets.protein, unit: 'g', color: colors.primary },
@@ -129,25 +183,35 @@ export default function ProgressScreen() {
     { label: 'Fats', value: today.fat, goal: macroTargets.fat, unit: 'g', color: colors.amber },
   ];
 
+  const photoCount = weights.filter(w => w.photo_key).length;
+  const transformationHint =
+    weights.length === 0
+      ? 'Log your first check-in to start'
+      : `${weights.length} ${weights.length === 1 ? 'check-in' : 'check-ins'} • ${photoCount} ${
+          photoCount === 1 ? 'photo' : 'photos'
+        }${first && latest && weights.length > 1 ? ` • ${first.weight_kg} → ${latest.weight_kg} kg` : ''}`;
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      >
         <Text style={styles.title}>Progress</Text>
         <View style={styles.chips}>
           <Chips options={VIEWS} value={view} onChange={setView} />
         </View>
 
+        {error && (
+          <Card>
+            <Text style={styles.error}>{error}</Text>
+          </Card>
+        )}
+
         {view === 'weight' && (
           <>
-            <Card>
-              <View style={styles.cardHeader}>
-                <Text style={styles.cardTitle}>Weight</Text>
-                <Text style={styles.cardValue}>{currentWeight} kg</Text>
-              </View>
-              <View style={styles.chartGap}>
-                <LineChart values={weights} labels={SAMPLE_WEIGHT_LABELS} />
-              </View>
-            </Card>
+            {weightCard}
             {streakCard}
             {consistencyCard(70)}
           </>
@@ -158,6 +222,7 @@ export default function ProgressScreen() {
         {view === 'macros' && (
           <Card>
             <Text style={styles.cardTitle}>Today&apos;s Macros</Text>
+            {target === 0 && <Text style={styles.cardHint}>Set up your profile to get macro targets.</Text>}
             {macroRows.map(row => (
               <View key={row.label} style={styles.macroRow}>
                 <View style={styles.cardHeader}>
@@ -165,7 +230,7 @@ export default function ProgressScreen() {
                   <Text style={styles.macroValue}>
                     {Math.round(row.value)}
                     <Text style={styles.macroGoal}>
-                      {' '}/ {row.goal.toLocaleString()} {row.unit}
+                      {' '}/ {row.goal ? row.goal.toLocaleString() : '–'} {row.unit}
                     </Text>
                   </Text>
                 </View>
@@ -186,7 +251,7 @@ export default function ProgressScreen() {
             <IconCircle name="body-outline" />
             <View style={styles.transformationText}>
               <Text style={styles.cardTitle}>Your Transformation</Text>
-              <Text style={styles.cardHint}>Week 4 of 12 • compare your progress photos</Text>
+              <Text style={styles.cardHint}>{transformationHint}</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
           </Card>
@@ -263,6 +328,35 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     fontSize: 12,
     color: colors.textMuted,
+  },
+  checkIns: {
+    marginTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  checkInRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  checkInDate: {
+    flex: 1,
+    fontFamily: fonts.medium,
+    fontSize: 13,
+    color: colors.navy,
+  },
+  checkInWeight: {
+    fontFamily: fonts.semibold,
+    fontSize: 13,
+    color: colors.navy,
+  },
+  error: {
+    fontFamily: fonts.medium,
+    fontSize: 13,
+    color: colors.danger,
   },
   transformationCard: {
     flexDirection: 'row',

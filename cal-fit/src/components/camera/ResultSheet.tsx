@@ -1,17 +1,29 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { scaleNutrients } from '@/components/foods/types';
 import { PrimaryButton, ProgressBar, SecondaryButton } from '@/components/kit';
-import { colors, fonts, screenPadding } from '@/constants/design';
+import { defaultMealType, MealTypePicker, Stepper } from '@/components/meal/MealControls';
+import { colors, fonts, radius, screenPadding } from '@/constants/design';
 import type { AiAnalysisResponse } from '@/lib/ai';
+import type { MealType } from '@/lib/db';
+
+export interface SaveOverrides {
+  name: string;
+  mealType: MealType;
+  /** Multiplier applied to the AI estimate (0.5×–3×). */
+  portion: number;
+}
 
 interface ResultSheetProps {
   imageUri: string;
+  /** Suggested name, editable before saving. */
   title: string;
   analysis: AiAnalysisResponse;
-  onSave: () => void;
+  onSave: (overrides: SaveOverrides) => void;
   onClose: () => void;
   isSaving: boolean;
   saveError: string | null;
@@ -40,7 +52,15 @@ function MacroRow({ label, grams, share, color }: { label: string; grams: number
 /** AI Result Modal (design #16): bottom sheet over the photo. */
 export function ResultSheet({ imageUri, title, analysis, onSave, onClose, isSaving, saveError }: ResultSheetProps) {
   const insets = useSafeAreaInsets();
-  const shares = macroShares(analysis);
+  const [name, setName] = useState(title);
+  const [mealType, setMealType] = useState<MealType>(defaultMealType());
+  const [portion, setPortion] = useState(1);
+
+  const scaled = scaleNutrients(
+    { calories: analysis.calories, protein: analysis.protein, carbs: analysis.carbs, fat: analysis.fat, fiber: analysis.fiber ?? 0 },
+    portion
+  );
+  const shares = macroShares({ ...analysis, ...scaled });
 
   return (
     <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
@@ -48,26 +68,53 @@ export function ResultSheet({ imageUri, title, analysis, onSave, onClose, isSavi
         <Ionicons name="close" size={20} color={colors.textMuted} />
       </Pressable>
 
-      <View style={styles.header}>
-        <Image source={{ uri: imageUri }} style={styles.thumb} contentFit="cover" />
-        <View style={styles.headerText}>
-          <Text style={styles.title} numberOfLines={2}>{title}</Text>
-          <Text style={styles.kcal}>{Math.round(analysis.calories)} kcal</Text>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.body}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.header}>
+          <Image source={{ uri: imageUri }} style={styles.thumb} contentFit="cover" />
+          <View style={styles.headerText}>
+            <TextInput
+              value={name}
+              onChangeText={setName}
+              placeholder="Name this meal"
+              placeholderTextColor={colors.textMuted}
+              maxLength={120}
+              accessibilityLabel="Meal name"
+              style={styles.titleInput}
+            />
+            <Text style={styles.kcal}>{Math.round(scaled.calories)} kcal</Text>
+          </View>
         </View>
-      </View>
 
-      <MacroRow label="Protein" grams={analysis.protein} share={shares.protein} color={colors.primary} />
-      <MacroRow label="Carbs" grams={analysis.carbs} share={shares.carbs} color="#5AB0F0" />
-      <MacroRow label="Fats" grams={analysis.fat} share={shares.fat} color={colors.amber} />
+        <MacroRow label="Protein" grams={scaled.protein} share={shares.protein} color={colors.primary} />
+        <MacroRow label="Carbs" grams={scaled.carbs} share={shares.carbs} color="#5AB0F0" />
+        <MacroRow label="Fats" grams={scaled.fat} share={shares.fat} color={colors.amber} />
 
-      {analysis.fiber !== undefined && (
-        <Text style={styles.fiber}>Fiber {Math.round(analysis.fiber)}g</Text>
-      )}
+        {analysis.fiber !== undefined && <Text style={styles.fiber}>Fiber {Math.round(scaled.fiber)}g</Text>}
+
+        <View style={styles.portionRow}>
+          <View style={styles.portionText}>
+            <Text style={styles.sectionLabel}>Portion</Text>
+            <Text style={styles.fiber}>Adjust if you ate more or less than pictured</Text>
+          </View>
+          <Stepper value={portion} onChange={setPortion} step={0.25} min={0.5} max={3} label="portion" />
+        </View>
+
+        <MealTypePicker value={mealType} onChange={setMealType} />
+      </ScrollView>
 
       {saveError && <Text style={styles.error}>{saveError}</Text>}
 
       <View style={styles.actions}>
-        <PrimaryButton title="Save to Diary" onPress={onSave} loading={isSaving} />
+        <PrimaryButton
+          title="Save to Diary"
+          onPress={() => onSave({ name: name.trim() || title, mealType, portion })}
+          loading={isSaving}
+        />
         <SecondaryButton title="Close" onPress={onClose} disabled={isSaving} />
       </View>
     </View>
@@ -81,6 +128,14 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 28,
     paddingTop: 24,
     paddingHorizontal: screenPadding + 4,
+    gap: 16,
+    maxHeight: '100%',
+  },
+  scroll: {
+    flexGrow: 0,
+    flexShrink: 1,
+  },
+  body: {
     gap: 16,
   },
   close: {
@@ -106,9 +161,28 @@ const styles = StyleSheet.create({
     paddingRight: 24,
     gap: 4,
   },
-  title: {
+  titleInput: {
     fontFamily: fonts.semibold,
     fontSize: 17,
+    color: colors.navy,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    marginLeft: -8,
+    borderRadius: radius.sm,
+    backgroundColor: colors.background,
+  },
+  portionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  portionText: {
+    flex: 1,
+    gap: 2,
+  },
+  sectionLabel: {
+    fontFamily: fonts.semibold,
+    fontSize: 15,
     color: colors.navy,
   },
   kcal: {
