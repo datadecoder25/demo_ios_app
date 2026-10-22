@@ -1,9 +1,11 @@
 /**
- * AI Analysis integration with Trigger.dev and OpenAI
+ * AI meal analysis. The app sends the photo to the /api/analyze-meal server route, which
+ * stores it and runs the `analyze-meal` Trigger.dev task (OpenAI) with server-side keys.
  */
 
-const TRIGGER_DEV_URL = process.env.EXPO_PUBLIC_TRIGGER_DEV_URL;
-const OPENAI_API_KEY = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
+import { Platform } from 'react-native';
+
+import { getAccessToken } from '@/lib/auth';
 
 export interface AiAnalysisResponse {
   calories: number;
@@ -23,32 +25,46 @@ export interface AiAnalysisResponse {
   analysisId?: string;
 }
 
-export async function triggerAiAnalysis(imageUrl: string): Promise<AiAnalysisResponse> {
-  if (!TRIGGER_DEV_URL) {
-    throw new Error('Trigger.dev URL not configured');
+export interface MealAnalysisResult {
+  analysis: AiAnalysisResponse;
+  /** Object-storage key of the uploaded photo; saved as the meal's photo_url. */
+  photoKey: string;
+}
+
+/** Uploads a local photo (file:// on native, blob: on web) and returns its analysis. */
+export async function triggerAiAnalysis(localImageUri: string): Promise<MealAnalysisResult> {
+  const token = await getAccessToken();
+  if (!token) {
+    throw new Error('Please sign in to analyze meals.');
+  }
+
+  const formData = new FormData();
+  if (Platform.OS === 'web') {
+    // Browsers need the actual file data; the { uri } shape only works in React Native.
+    const blob = await (await fetch(localImageUri)).blob();
+    formData.append('photo', blob, 'meal.jpg');
+  } else {
+    formData.append('photo', { uri: localImageUri, name: 'meal.jpg', type: 'image/jpeg' } as any);
   }
 
   try {
-    const response = await fetch(TRIGGER_DEV_URL, {
+    // Relative URL: resolves to the dev server in development (set the expo-router
+    // `origin` plugin option for production native builds).
+    const response = await fetch('/api/analyze-meal', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        imageUrl,
-        apiKey: OPENAI_API_KEY,
-        model: 'gpt-4o-mini',
-        prompt: `Analyze this meal image and return JSON with: calories (kcal), protein (g), carbs (g), fat (g), fiber (g). Include confidence scores for each estimate.`,
-      }),
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
     });
 
+    const data = await response.json().catch(() => null);
     if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(`AI analysis failed: ${errorData.message}`);
+      throw new Error(data?.message || `AI analysis failed: ${response.status}`);
+    }
+    if (!validateAiResponse(data?.analysis)) {
+      throw new Error('AI analysis returned an unexpected response.');
     }
 
-    const data = await response.json();
-    return data as AiAnalysisResponse;
+    return data as MealAnalysisResult;
   } catch (error) {
     console.error('AI analysis error:', error);
     throw error;

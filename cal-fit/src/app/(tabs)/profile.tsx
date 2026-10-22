@@ -1,133 +1,110 @@
-import { useState } from 'react';
-import { View, StyleSheet, ScrollView, Alert, Text, Switch, Pressable } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { Card, ListRow } from '@/components/kit';
+import { colors, fonts, radius, screenPadding } from '@/constants/design';
 import { useUser } from '@/contexts/UserContext';
+import { Alert } from '@/lib/alert';
+import { GOALS } from '@/lib/nutrition';
+
+// SAMPLE: subscriptions aren't wired to in-app purchases yet.
+const SAMPLE_PLAN = { name: 'Premium', activeUntil: 'Dec 2026' };
+
+function comingSoon(feature: string) {
+  Alert.alert('Coming soon', `${feature} will be available in a future update.`);
+}
 
 export default function ProfileScreen() {
-  const { user, signOut } = useUser();
-  const [unitPreference, setUnitPreference] = useState<'imperial' | 'metric'>('imperial');
-  const [darkMode, setDarkMode] = useState(false);
+  const { user, profile, signOut } = useUser();
 
-  const handleLogout = () => {
+  const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || 'Your profile';
+  const initials =
+    [user?.firstName, user?.lastName]
+      .filter((part): part is string => !!part)
+      .map(part => part[0].toUpperCase())
+      .join('') || (user?.email?.[0]?.toUpperCase() ?? '?');
+
+  const goalLabel = GOALS.find(g => g.value === profile?.goal)?.label ?? 'No goal set';
+  const goalSubtitle = profile?.goal_weight ? `${goalLabel} • ${Number(profile.goal_weight)} kg` : goalLabel;
+
+  const showGoals = () => {
+    if (!profile) return comingSoon('Goal editing');
     Alert.alert(
-      'Sign Out',
-      "Are you sure you want to sign out?",
+      'My Goals',
       [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Sign Out', style: 'destructive', onPress: signOut },
+        `Goal: ${goalLabel}`,
+        profile.weight ? `Current weight: ${Number(profile.weight)} kg` : null,
+        profile.goal_weight ? `Goal weight: ${Number(profile.goal_weight)} kg` : null,
+        profile.daily_calorie_target ? `Daily target: ${profile.daily_calorie_target.toLocaleString()} kcal` : null,
       ]
+        .filter(Boolean)
+        .join('\n')
     );
   };
 
-  const handleUnitToggle = () => {
-    const newPreference = unitPreference === 'imperial' ? 'metric' : 'imperial';
-    setUnitPreference(newPreference);
-  };
-
-  const handleDarkModeToggle = () => {
-    setDarkMode(!darkMode);
+  const confirmLogout = () => {
+    Alert.alert('Log Out', 'Are you sure you want to log out?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Log Out', style: 'destructive', onPress: signOut },
+    ]);
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView style={styles.scrollView}>
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
-          <Text style={styles.name}>
-            {user?.firstName} {user?.lastName}
-          </Text>
-          <Text style={styles.email}>{user?.email}</Text>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Appearance</Text>
-          
-          <View style={styles.settingCard}>
-            <View style={styles.settingItem}>
-              <Text style={styles.settingLabel}>Units</Text>
-              <Text style={styles.settingValue}>
-                {unitPreference === 'imperial' ? 'Imperial (lbs, inches)' : 'Metric (kg, cm)'}
-              </Text>
-              <Pressable 
-                style={styles.unitChip}
-                onPress={handleUnitToggle}
-              >
-                <Text style={styles.unitChipText}>
-                  {unitPreference === 'imperial' ? 'Imperial' : 'Metric'}
-                </Text>
-              </Pressable>
-            </View>
+          <View style={styles.avatar}>
+            <Text style={styles.initials}>{initials}</Text>
           </View>
-
-          <View style={styles.settingCard}>
-            <View style={styles.settingItem}>
-              <Text style={styles.settingLabel}>Dark Mode</Text>
-              <Text style={styles.settingValue}>Use dark theme</Text>
-              <Switch value={darkMode} onValueChange={handleDarkModeToggle} />
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Your Stats</Text>
-          
-          <View style={styles.statsContainer}>
-            <View style={styles.statCard}>
-              <Text style={styles.statLabel}>Age</Text>
-              <Text style={styles.statValue}>30</Text>
-              <Text style={styles.statUnit}>years</Text>
-            </View>
-            
-            <View style={styles.statCard}>
-              <Text style={styles.statLabel}>Height</Text>
-              <Text style={styles.statValue}>5'9"</Text>
-            </View>
-            
-            <View style={styles.statCard}>
-              <Text style={styles.statLabel}>Weight</Text>
-              <Text style={styles.statValue}>165 lbs</Text>
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Fitness Goals</Text>
-          
-          <View style={styles.goalCard}>
-            <View style={styles.goalContent}>
-              <Text style={styles.goalLabel}>Current Goal</Text>
-              <View style={styles.goalChipContainer}>
-                <Text style={styles.goalChip}>Lose Weight</Text>
+          <View style={styles.headerText}>
+            <Text style={styles.name}>{fullName}</Text>
+            {user?.email && <Text style={styles.email}>{user.email}</Text>}
+            <View style={styles.planRow}>
+              <View style={styles.planPill}>
+                <Text style={styles.planPillText}>{SAMPLE_PLAN.name}</Text>
               </View>
-              
-              <Text style={styles.goalLabel}>Activity Level</Text>
-              <View style={styles.goalChipContainer}>
-                <Text style={styles.goalChip}>Moderately Active</Text>
-              </View>
+              <Text style={styles.planMeta}>Active until {SAMPLE_PLAN.activeUntil}</Text>
             </View>
           </View>
-        </View>
-
-        <View style={styles.actions}>
-          <Pressable 
-            style={styles.editButton}
-            onPress={() => Alert.alert('Edit Profile', 'Feature coming soon!')}
+          <Pressable
+            onPress={() => router.push('/notifications')}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="Notifications"
+            style={styles.bell}
           >
-            <Text style={styles.editButtonText}>Edit Profile</Text>
-          </Pressable>
-          
-          <Pressable 
-            style={styles.logoutButton}
-            onPress={handleLogout}
-          >
-            <Text style={styles.logoutButtonText}>Sign Out</Text>
+            <Ionicons name="notifications-outline" size={22} color={colors.navy} />
           </Pressable>
         </View>
 
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>CalFit v1.0.0</Text>
-          <Text style={styles.footerText}>© 2026 CalFit Inc.</Text>
-        </View>
+        <Card style={styles.list}>
+          <ListRow icon="trophy-outline" title="My Goals" subtitle={goalSubtitle} onPress={showGoals} />
+          <ListRow
+            icon="notifications-outline"
+            title="Reminders"
+            subtitle="Meal, workout, water"
+            onPress={() => router.push('/notifications')}
+          />
+          <ListRow
+            icon="card-outline"
+            title="Subscription"
+            subtitle={`${SAMPLE_PLAN.name} • Active`}
+            onPress={() => router.push('/paywall')}
+          />
+        </Card>
+
+        <Card style={styles.list}>
+          <ListRow icon="settings-outline" title="Settings" onPress={() => comingSoon('Settings')} />
+          <ListRow
+            icon="notifications-circle-outline"
+            title="Notification Preferences"
+            onPress={() => router.push('/notifications')}
+          />
+          <ListRow icon="help-circle-outline" title="Help & Support" onPress={() => comingSoon('Help & Support')} />
+          <ListRow icon="log-out-outline" title="Log Out" danger onPress={confirmLogout} />
+        </Card>
       </ScrollView>
     </SafeAreaView>
   );
@@ -136,147 +113,77 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: colors.background,
   },
-  scrollView: {
-    paddingBottom: 40,
+  content: {
+    width: '100%',
+    maxWidth: 520,
+    alignSelf: 'center',
+    paddingHorizontal: screenPadding,
+    paddingTop: 16,
+    paddingBottom: 28,
+    gap: 16,
   },
   header: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 14,
+  },
+  avatar: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: colors.primaryTint,
+    borderWidth: 2,
+    borderColor: colors.surface,
     alignItems: 'center',
-    padding: 30,
-    backgroundColor: '#208AEF',
+    justifyContent: 'center',
+  },
+  initials: {
+    fontFamily: fonts.bold,
+    fontSize: 22,
+    color: colors.primary,
+  },
+  headerText: {
+    flex: 1,
   },
   name: {
-    color: '#fff',
-    fontSize: 24,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
+    fontSize: 19,
+    color: colors.navy,
   },
   email: {
-    color: 'rgba(255, 255, 255, 0.9)',
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: colors.textSecondary,
+    marginTop: 2,
   },
-  section: {
-    paddingHorizontal: 20,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 12,
-    color: '#333',
-  },
-  settingCard: {
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    marginBottom: 12,
-    padding: 16,
-  },
-  settingItem: {
+  planRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-  },
-  settingLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  settingValue: {
-    fontSize: 14,
-    color: '#666',
-  },
-  unitChip: {
-    backgroundColor: '#E3F2FD',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 4,
-  },
-  unitChipText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#208AEF',
-  },
-  statsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-  },
-  statCard: {
-    width: '48%',
-    backgroundColor: '#fff',
-    padding: 16,
-    borderRadius: 8,
-    marginBottom: 8,
-    alignItems: 'center',
-  },
-  statLabel: {
-    fontSize: 12,
-    color: '#666',
-  },
-  statValue: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  statUnit: {
-    fontSize: 12,
-    color: '#999',
-    marginTop: 4,
-  },
-  goalCard: {
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    padding: 16,
-  },
-  goalContent: {
     gap: 8,
+    marginTop: 8,
   },
-  goalLabel: {
-    fontSize: 14,
-    fontWeight: '600',
+  planPill: {
+    backgroundColor: colors.primary,
+    borderRadius: radius.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
   },
-  goalChipContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
+  planPillText: {
+    fontFamily: fonts.semibold,
+    fontSize: 11,
+    color: colors.white,
   },
-  goalChip: {
-    backgroundColor: '#E3F2FD',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 4,
-    fontSize: 12,
-    fontWeight: '600',
+  planMeta: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    color: colors.textMuted,
   },
-  actions: {
-    paddingHorizontal: 20,
-    gap: 12,
+  bell: {
+    paddingTop: 4,
   },
-  editButton: {
-    backgroundColor: '#208AEF',
-    padding: 14,
-    borderRadius: 12,
-  },
-  editButtonText: {
-    color: '#fff',
-    textAlign: 'center',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  logoutButton: {
-    borderWidth: 2,
-    borderColor: '#f44336',
-    padding: 14,
-    borderRadius: 12,
-  },
-  logoutButtonText: {
-    color: '#f44336',
-    textAlign: 'center',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  footer: {
-    alignItems: 'center',
-    padding: 20,
-  },
-  footerText: {
-    color: '#999',
+  list: {
+    paddingVertical: 0,
   },
 });

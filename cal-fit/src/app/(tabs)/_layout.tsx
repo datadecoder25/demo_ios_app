@@ -1,50 +1,50 @@
+import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
-import { useColorScheme } from 'react-native';
+
+import { colors, fonts } from '@/constants/design';
+
+type IconName = keyof typeof Ionicons.glyphMap;
+
+const TABS: { name: string; title: string; icon: IconName; activeIcon: IconName }[] = [
+  { name: 'index', title: 'Home', icon: 'home-outline', activeIcon: 'home' },
+  { name: 'foods', title: 'Foods', icon: 'restaurant-outline', activeIcon: 'restaurant' },
+  { name: 'progress', title: 'Progress', icon: 'stats-chart-outline', activeIcon: 'stats-chart' },
+  { name: 'profile', title: 'Profile', icon: 'person-outline', activeIcon: 'person' },
+];
 
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
-  const activeColor = colorScheme === 'dark' ? '#fff' : '#208AEF';
-  const inactiveColor = colorScheme === 'dark' ? '#888' : '#666';
-  const backgroundColor = colorScheme === 'dark' ? '#1c1c1e' : '#ffffff';
-  const borderColor = colorScheme === 'dark' ? '#333' : '#e0e0e0';
-
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: activeColor as any,
-        tabBarInactiveTintColor: inactiveColor as any,
+        tabBarActiveTintColor: colors.primary,
+        tabBarInactiveTintColor: colors.textMuted,
         tabBarStyle: {
-          backgroundColor: backgroundColor as any,
-          borderTopColor: borderColor as any,
-          height: 60,
-          paddingBottom: 10,
-          paddingTop: 10,
+          backgroundColor: colors.surface,
+          borderTopColor: colors.border,
+          height: 76,
+          paddingTop: 8,
+          paddingBottom: 18,
         },
         tabBarLabelStyle: {
-          fontSize: 12,
-          marginBottom: 5,
+          fontFamily: fonts.medium,
+          fontSize: 11,
         },
+        sceneStyle: { backgroundColor: colors.background },
       }}
     >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Home',
-        }}
-      />
-      <Tabs.Screen
-        name="camera"
-        options={{
-          title: 'Log',
-        }}
-      />
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: 'Profile',
-        }}
-      />
+      {TABS.map(tab => (
+        <Tabs.Screen
+          key={tab.name}
+          name={tab.name}
+          options={{
+            title: tab.title,
+            tabBarIcon: ({ color, focused, size }) => (
+              <Ionicons name={focused ? tab.activeIcon : tab.icon} size={size - 2} color={color as string} />
+            ),
+          }}
+        />
+      ))}
     </Tabs>
   );
 }

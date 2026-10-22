@@ -1,266 +1,332 @@
-import { useState } from 'react';
-import { ScrollView, StyleSheet, View, Text, Alert, TextInput, Pressable } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useState } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
 
+import { Card, IconCircle, OptionCard, PrimaryButton, ProgressBar, Screen } from '@/components/kit';
+import { SliderCard } from '@/components/onboarding/SliderCard';
+import { colors, fonts, type } from '@/constants/design';
 import { useUser } from '@/contexts/UserContext';
+import { Alert } from '@/lib/alert';
+import {
+  ACTIVITY_LEVELS,
+  calculateTargets,
+  Gender,
+  GOALS,
+  GYM_EXPERIENCE,
+  MACRO_SPLIT,
+} from '@/lib/nutrition';
+
+const STEP_COUNT = 8;
+
+const GOAL_COPY: Record<string, string> = {
+  gain_weight: 'This will help you gain weight and build muscle steadily.',
+  build_muscle: 'This will fuel muscle growth while keeping you lean.',
+  get_stronger: 'This will give you the energy to get stronger every week.',
+  improve_health: 'This will keep you energized and support a healthier you.',
+};
 
 export default function OnboardingScreen() {
-  const { user } = useUser();
-  const [isLoading, setIsLoading] = useState(false);
-  const [formData, setFormData] = useState({
-    age: '',
-    height: '',
-    weight: '',
-    activityLevel: '',
-    medicalConditions: '',
-    goal: '',
-    unitPreference: 'imperial' as 'imperial' | 'metric',
-  });
+  const { saveProfile } = useUser();
+  const [step, setStep] = useState(0);
+  const [gender, setGender] = useState<Gender | null>(null);
+  const [height, setHeight] = useState(175);
+  const [weight, setWeight] = useState(62);
+  const [goalWeight, setGoalWeight] = useState(75);
+  const [activity, setActivity] = useState<string | null>(null);
+  const [experience, setExperience] = useState<string | null>(null);
+  const [goal, setGoal] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
-  const activityLevels = [
-    { label: 'Sedentary', value: 'sedentary' },
-    { label: 'Lightly Active', value: 'lightly_active' },
-    { label: 'Moderately Active', value: 'moderately_active' },
-    { label: 'Very Active', value: 'very_active' },
-    { label: 'Extra Active', value: 'extra_active' },
-  ];
+  const targets =
+    gender && activity && goal
+      ? calculateTargets({
+          gender,
+          heightCm: height,
+          weightKg: weight,
+          goalWeightKg: goalWeight,
+          activityLevel: activity,
+          goal,
+        })
+      : null;
 
-  const goals = [
-    { label: 'Lose Weight', value: 'lose_weight' },
-    { label: 'Maintain Weight', value: 'maintain_weight' },
-    { label: 'Gain Weight', value: 'gain_weight' },
-  ];
+  // Whether "Next" is enabled on each step (sliders always have a value).
+  const canContinue = [!!gender, true, true, true, !!activity, !!experience, !!goal, !!targets][step];
+  const isLast = step === STEP_COUNT - 1;
 
-  const handleSave = async () => {
-    if (!user) return;
-
-    setIsLoading(true);
-
+  async function handleFinish() {
+    if (!targets || !gender) return;
+    setIsSaving(true);
     try {
-      const age = parseInt(formData.age) || 30;
-      const height = parseInt(formData.height) || 170;
-      const weight = parseInt(formData.weight) || 70;
-      const activityMultiplier = {
-        sedentary: 1.2,
-        lightly_active: 1.375,
-        moderately_active: 1.55,
-        very_active: 1.725,
-        extra_active: 1.9,
-      }[formData.activityLevel] || 1.2;
-
-      let bmr = (10 * weight) + (6.25 * height) - (5 * age);
-      bmr += 5;
-      
-      const dailyCalories = Math.round(bmr * activityMultiplier);
-
-      router.replace('/home' as any);
+      await saveProfile({
+        gender,
+        height,
+        weight,
+        goal_weight: goalWeight,
+        activity_level: activity,
+        gym_experience: experience,
+        goal,
+        unit_preference: 'metric',
+        daily_calorie_target: targets.calories,
+        age: null,
+      });
+      // The root layout's guards switch to the tabs once the profile exists; this is a fallback.
+      router.replace('/');
     } catch (error) {
-      Alert.alert('Error', 'Failed to save profile. Please try again.');
-      console.error('Onboarding error:', error);
-      setIsLoading(false);
+      console.error('Onboarding save error:', error);
+      Alert.alert('Error', 'Failed to save your profile. Please try again.');
+      setIsSaving(false);
     }
-  };
+  }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollView}>
-        <View style={styles.header}>
-          <Text style={styles.title}>Let's set up your profile</Text>
-          <Text style={styles.subtitle}>
-            We'll use this information to personalize your nutrition recommendations.
-          </Text>
-        </View>
+    <Screen
+      scroll
+      onBack={step > 0 ? () => setStep(s => s - 1) : undefined}
+      contentStyle={step === 0 ? styles.firstStep : undefined}
+      footer={
+        <PrimaryButton
+          title={isLast ? 'Start My Journey' : 'Next'}
+          disabled={!canContinue}
+          loading={isSaving}
+          onPress={isLast ? handleFinish : () => setStep(s => s + 1)}
+        />
+      }
+    >
+      {step === 0 && (
+        <Step title="What's your gender?" subtitle="We'll use this to calculate your calorie needs.">
+          <OptionCard
+            title="Male"
+            selected={gender === 'male'}
+            onPress={() => setGender('male')}
+            leading={<IconCircle name="man" active={gender === 'male'} />}
+          />
+          <OptionCard
+            title="Female"
+            selected={gender === 'female'}
+            onPress={() => setGender('female')}
+            leading={
+              <IconCircle
+                name="woman"
+                background={gender === 'female' ? '#8B5CF6' : '#F1EBFF'}
+                color={gender === 'female' ? colors.white : '#8B5CF6'}
+              />
+            }
+          />
+        </Step>
+      )}
 
-        <View style={styles.form}>
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Age</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Enter your age"
-              value={formData.age}
-              onChangeText={(text) => setFormData({ ...formData, age: text })}
-              keyboardType="numeric"
+      {step === 1 && (
+        <Step title="What's your height?" subtitle="We'll use this to calculate your calorie needs.">
+          <SliderCard label="Height" value={height} unit="cm" min={140} max={210} icon="body-outline" onChange={setHeight} />
+        </Step>
+      )}
+
+      {step === 2 && (
+        <Step title="What's your current weight?" subtitle="This helps us track your progress.">
+          <SliderCard label="Current weight" value={weight} unit="kg" min={50} max={120} icon="scale-outline" onChange={setWeight} />
+        </Step>
+      )}
+
+      {step === 3 && (
+        <Step title="What's your goal weight?" subtitle="Set a realistic target for steady progress.">
+          <SliderCard label="Goal weight" value={goalWeight} unit="kg" min={50} max={150} icon="locate-outline" onChange={setGoalWeight} />
+        </Step>
+      )}
+
+      {step === 4 && (
+        <Step title="How active are you?" subtitle="This helps us set the right calorie target for you.">
+          {ACTIVITY_LEVELS.map(level => (
+            <OptionCard
+              key={level.value}
+              icon={level.icon}
+              title={level.label}
+              subtitle={level.subtitle}
+              selected={activity === level.value}
+              onPress={() => setActivity(level.value)}
             />
-          </View>
+          ))}
+        </Step>
+      )}
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Height ({formData.unitPreference === 'imperial' ? 'inches' : 'cm'})</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Enter your height"
-              value={formData.height}
-              onChangeText={(text) => setFormData({ ...formData, height: text })}
-              keyboardType="numeric"
+      {step === 5 && (
+        <Step title="How much gym experience do you have?">
+          {GYM_EXPERIENCE.map(level => (
+            <OptionCard
+              key={level.value}
+              icon={level.icon}
+              title={level.label}
+              subtitle={level.subtitle}
+              selected={experience === level.value}
+              onPress={() => setExperience(level.value)}
             />
-          </View>
+          ))}
+        </Step>
+      )}
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Weight ({formData.unitPreference === 'imperial' ? 'lbs' : 'kg'})</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Enter your weight"
-              value={formData.weight}
-              onChangeText={(text) => setFormData({ ...formData, weight: text })}
-              keyboardType="numeric"
+      {step === 6 && (
+        <Step title="What's your main goal?">
+          {GOALS.map(option => (
+            <OptionCard
+              key={option.value}
+              icon={option.icon}
+              title={option.label}
+              selected={goal === option.value}
+              onPress={() => setGoal(option.value)}
             />
-          </View>
+          ))}
+        </Step>
+      )}
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Activity Level</Text>
-            <View style={styles.chipContainer}>
-              {activityLevels.map((level) => (
-                <Pressable
-                  key={level.value}
-                  style={styles.chip}
-                  onPress={() => setFormData({ ...formData, activityLevel: level.value })}
-                >
-                  <Text style={styles.chipText}>{level.label}</Text>
-                </Pressable>
-              ))}
+      {step === 7 && targets && (
+        <View style={styles.result}>
+          <View style={styles.halo}>
+            <View style={styles.haloInner}>
+              <Ionicons name="flame" size={34} color={colors.white} />
             </View>
           </View>
+          <Text style={styles.resultLabel}>Your daily calorie target</Text>
+          <Text style={styles.resultValue}>{targets.calories.toLocaleString('en-US')}</Text>
+          <Text style={styles.resultUnit}>calories</Text>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Your Goal</Text>
-            <View style={styles.chipContainer}>
-              {goals.map((goal) => (
-                <Pressable
-                  key={goal.value}
-                  style={styles.chip}
-                  onPress={() => setFormData({ ...formData, goal: goal.value })}
-                >
-                  <Text style={styles.chipText}>{goal.label}</Text>
-                </Pressable>
-              ))}
-            </View>
-          </View>
+          <Card style={styles.macros}>
+            <MacroRow label="Protein" grams={targets.protein} share={MACRO_SPLIT.protein} color={colors.primary} />
+            <MacroRow label="Carbs" grams={targets.carbs} share={MACRO_SPLIT.carbs} color={colors.teal} />
+            <MacroRow label="Fats" grams={targets.fat} share={MACRO_SPLIT.fat} color={colors.amber} last />
+          </Card>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Medical Conditions (optional)</Text>
-            <TextInput
-              style={styles.input}
-              multiline={true}
-              numberOfLines={3}
-              value={formData.medicalConditions}
-              onChangeText={(text) => setFormData({ ...formData, medicalConditions: text })}
-              placeholder="e.g., Diabetes, Ketogenic diet, etc."
-            />
-          </View>
-
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Units</Text>
-            <View style={styles.unitContainer}>
-              <Pressable 
-                style={styles.unitChip}
-                onPress={() => setFormData({ ...formData, unitPreference: 'imperial' })}
-              >
-                <Text style={styles.unitChipText}>Imperial (lbs, inches)</Text>
-              </Pressable>
-              <Pressable 
-                style={styles.unitChip}
-                onPress={() => setFormData({ ...formData, unitPreference: 'metric' })}
-              >
-                <Text style={styles.unitChipText}>Metric (kg, cm)</Text>
-              </Pressable>
-            </View>
-          </View>
+          <Text style={styles.resultCopy}>{GOAL_COPY[goal ?? ''] ?? GOAL_COPY.gain_weight}</Text>
         </View>
+      )}
+    </Screen>
+  );
+}
 
-        <View style={styles.footer}>
-          <Pressable
-            style={styles.saveButton}
-            onPress={handleSave}
-            disabled={isLoading}
-          >
-            <Text style={styles.saveButtonText}>Complete Setup</Text>
-          </Pressable>
-        </View>
-      </ScrollView>
-    </SafeAreaView>
+function Step({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+  return (
+    <View>
+      <Text style={styles.title}>{title}</Text>
+      {subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}
+      <View style={styles.options}>{children}</View>
+    </View>
+  );
+}
+
+function MacroRow({
+  label,
+  grams,
+  share,
+  color,
+  last,
+}: {
+  label: string;
+  grams: number;
+  share: number;
+  color: string;
+  last?: boolean;
+}) {
+  return (
+    <View style={[styles.macroRow, !last && styles.macroRowSpacing]}>
+      <View style={styles.macroHeader}>
+        <Text style={styles.macroLabel}>{label}</Text>
+        <Text style={styles.macroGrams}>{grams}g</Text>
+        <Text style={styles.macroShare}>{Math.round(share * 100)}%</Text>
+      </View>
+      <ProgressBar progress={share} color={color} />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  scrollView: {
-    padding: 20,
-    paddingBottom: 40,
-  },
-  header: {
-    alignItems: 'center',
-    marginBottom: 30,
+  firstStep: {
+    paddingTop: 40,
   },
   title: {
-    textAlign: 'center',
-    marginBottom: 8,
-    fontSize: 24,
-    fontWeight: 'bold',
+    ...type.title,
+    marginTop: 16,
   },
   subtitle: {
-    textAlign: 'center',
-    color: '#666',
+    ...type.body,
+    marginTop: 8,
   },
-  form: {
-    gap: 20,
-  },
-  inputGroup: {
-    gap: 8,
-  },
-  label: {
-    fontWeight: '600',
-  },
-  input: {
-    backgroundColor: '#fff',
-    padding: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
-  chipContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  chip: {
-    backgroundColor: '#e0e0e0',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 4,
-  },
-  chipText: {
-    fontSize: 12,
-  },
-  unitContainer: {
-    flexDirection: 'row',
+  options: {
+    marginTop: 28,
     gap: 12,
   },
-  unitChip: {
+  result: {
+    alignItems: 'center',
+    paddingTop: 16,
+  },
+  halo: {
+    width: 108,
+    height: 108,
+    borderRadius: 54,
+    backgroundColor: colors.primaryTint,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 18,
+  },
+  haloInner: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  resultLabel: {
+    ...type.subheading,
+  },
+  resultValue: {
+    fontFamily: fonts.extrabold,
+    fontSize: 48,
+    lineHeight: 56,
+    color: colors.navy,
+    marginTop: 8,
+  },
+  resultUnit: {
+    fontFamily: fonts.medium,
+    fontSize: 18,
+    color: colors.navy,
+  },
+  macros: {
+    alignSelf: 'stretch',
+    marginTop: 24,
+  },
+  macroRow: {
+    gap: 8,
+  },
+  macroRowSpacing: {
+    marginBottom: 18,
+  },
+  macroHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  macroLabel: {
     flex: 1,
-    backgroundColor: '#e0e0e0',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 4,
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: colors.navy,
   },
-  unitChipText: {
+  macroGrams: {
+    fontFamily: fonts.bold,
+    fontSize: 14,
+    color: colors.navy,
+    width: 64,
+    textAlign: 'right',
+  },
+  macroShare: {
+    fontFamily: fonts.regular,
     fontSize: 12,
+    color: colors.textMuted,
+    width: 48,
+    textAlign: 'right',
+  },
+  resultCopy: {
+    ...type.body,
     textAlign: 'center',
-  },
-  footer: {
-    marginTop: 30,
-  },
-  saveButton: {
-    backgroundColor: '#208AEF',
-    paddingVertical: 16,
-    borderRadius: 12,
-    textAlign: 'center',
-  },
-  saveButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
+    marginTop: 20,
+    paddingHorizontal: 16,
   },
 });

@@ -1,12 +1,12 @@
 /**
  * Database utilities for Neon Postgres
- * Uses REST API via Supabase Client or direct fetch
+ * Uses the Neon Data API (PostgREST) with the signed-in user's Neon Auth JWT.
+ * Row-Level Security in db/schema.sql scopes every query to that user.
  */
 
-import { Platform } from 'react-native';
+import { getAccessToken } from '@/lib/auth';
 
 const NEON_API_URL = process.env.EXPO_PUBLIC_NEON_API_URL;
-const NEON_API_KEY = process.env.EXPO_PUBLIC_NEON_API_KEY;
 
 interface DbResponse<T> {
   data: T[] | null;
@@ -14,16 +14,23 @@ interface DbResponse<T> {
 }
 
 async function fetchNeon<T>(endpoint: string, options?: RequestInit): Promise<DbResponse<T>> {
-  if (!NEON_API_URL || !NEON_API_KEY) {
-    console.error('Neon API URL or Key not configured');
+  if (!NEON_API_URL) {
+    console.error('Neon API URL not configured');
     return { data: null, error: new Error('Neon API not configured') };
   }
 
   try {
+    const token = await getAccessToken();
+    if (!token) {
+      return { data: null, error: new Error('Not signed in') };
+    }
+
     const url = `${NEON_API_URL}/${endpoint}`;
     const headers = {
-      'apikey': NEON_API_KEY,
+      'Authorization': `Bearer ${token}`,
       'Content-Type': 'application/json',
+      // Without this, writes return an empty body and response.json() would throw.
+      'Prefer': 'return=representation',
       ...options?.headers,
     };
 
@@ -40,62 +47,35 @@ async function fetchNeon<T>(endpoint: string, options?: RequestInit): Promise<Db
   }
 }
 
-export const userApi = {
-  async getByClerkId(clerkId: string) {
-    return fetchNeon<{ id: string; clerk_id: string; anonymous_id: string | null }>(
-      `users?clerk_id=eq.${clerkId}`
-    );
-  },
+export interface Profile {
+  id: string;
+  user_id: string;
+  age: number | null;
+  gender: 'male' | 'female' | null;
+  height: number | null;
+  weight: number | null;
+  goal_weight: number | null;
+  activity_level: string | null;
+  gym_experience: string | null;
+  medical_conditions: string | null;
+  goal: string | null;
+  unit_preference: 'imperial' | 'metric';
+  daily_calorie_target: number | null;
+  created_at: string;
+  updated_at: string;
+}
 
-  async create(clerkId: string, anonymousId: string | null = null) {
-    return fetchNeon<{ id: string }>('users', {
-      method: 'POST',
-      body: JSON.stringify({ clerk_id: clerkId, anonymous_id: anonymousId }),
-    });
-  },
-
-  async merge(guestId: string, loggedInId: string) {
-    await fetchNeon<null>(`meal?user_id=eq.${guestId}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ user_id: loggedInId }),
-    });
-
-    return fetchNeon<null>(`users?id=eq.${guestId}`, {
-      method: 'DELETE',
-    });
-  },
-};
+export type ProfileInput = Partial<Omit<Profile, 'id' | 'user_id' | 'created_at' | 'updated_at'>>;
 
 export const profileApi = {
   async getByUserId(userId: string) {
-    return fetchNeon<{
-      id: string;
-      user_id: string;
-      age: number | null;
-      height: number | null;
-      weight: number | null;
-      activity_level: string | null;
-      medical_conditions: string | null;
-      goal: string | null;
-      unit_preference: 'imperial' | 'metric';
-      daily_calorie_target: number | null;
-      created_at: string;
-      updated_at: string;
-    }>(`profile?user_id=eq.${userId}`);
+    return fetchNeon<Profile>(`profile?user_id=eq.${userId}`);
   },
 
-  async upsert(userId: string, data: Partial<{
-    age: number;
-    height: number;
-    weight: number;
-    activity_level: string;
-    medical_conditions: string;
-    goal: string;
-    unit_preference: 'imperial' | 'metric';
-    daily_calorie_target: number;
-  }>) {
-    return fetchNeon<{ id: string }>('profile', {
+  async upsert(userId: string, data: ProfileInput) {
+    return fetchNeon<Profile>('profile?on_conflict=user_id', {
       method: 'POST',
+      headers: { 'Prefer': 'return=representation,resolution=merge-duplicates' },
       body: JSON.stringify({ user_id: userId, ...data }),
     });
   },
@@ -116,6 +96,19 @@ export const mealApi = {
       is_manual: boolean;
       manual_name: string | null;
     }>(endpoint);
+  },
+
+  /** Meals created at or after `since` (ISO timestamp), newest first. */
+  async getSince(userId: string, since: string) {
+    return fetchNeon<{
+      id: string;
+      user_id: string;
+      photo_url: string | null;
+      analysis_json: any | null;
+      created_at: string;
+      is_manual: boolean;
+      manual_name: string | null;
+    }>(`meal?user_id=eq.${userId}&is_deleted=eq.false&created_at=gte.${encodeURIComponent(since)}&order=created_at.desc`);
   },
 
   async getById(id: string) {
@@ -192,6 +185,9 @@ export const mealFoodApi = {
   },
 };
 
+/** Credits spent per AI meal analysis (the free tier grants 4 per month). */
+export const ANALYSIS_CREDIT_COST = 1;
+
 export const creditTransactionApi = {
   async getByUserId(userId: string) {
     return fetchNeon<{
@@ -204,10 +200,11 @@ export const creditTransactionApi = {
     }>(`credit_transaction?user_id=eq.${userId}&order=created_at.desc`);
   },
 
-  async addCredits(userId: string, amount: number, type: 'free' | 'purchase' = 'free') {
-    return fetchNeon<{ id: string }>('credit_transaction', {
+  /** Grants the monthly free credits if not yet claimed this month; resolves to the amount granted. */
+  async claimFreeCredits() {
+    return fetchNeon<number>('rpc/claim_free_credits', {
       method: 'POST',
-      body: JSON.stringify({ user_id: userId, amount, type }),
+      body: '{}',
     });
   },
 

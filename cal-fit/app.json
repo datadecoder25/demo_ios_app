@@ -7,13 +7,8 @@
     "icon": "./assets/images/icon.png",
     "scheme": "calfit",
     "userInterfaceStyle": "automatic",
-    "splash": {
-      "image": "./assets/images/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#208AEF"
-    },
     "ios": {
-      "icon": "./assets/images/ios-icon.png",
+      "icon": "./assets/images/icon.png",
       "bundleIdentifier": "com.calfit.app",
       "supportsTablet": false,
       "infoPlist": {
@@ -62,7 +57,8 @@
         {
           "faceIDPermission": "The app uses Face ID to secure your account."
         }
-      ]
+      ],
+      "expo-image"
     ],
     "experiments": {
       "typedRoutes": true,

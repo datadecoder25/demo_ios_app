@@ -10,8 +10,6 @@ interface CameraContextType {
   requestCameraRollPermission: () => Promise<void>;
   pickFromCamera: () => Promise<void>;
   pickFromCameraRoll: () => Promise<void>;
-  uploadImage: () => Promise<{ url: string }>;
-  getThumbnailUrl: (url: string) => string;
   isBlurry: (uri: string) => boolean;
   clearImage: () => void;
 }
@@ -24,16 +22,16 @@ export function CameraProvider({ children }: { children: React.ReactNode }) {
   const [cameraRollPermission, setCameraRollPermission] = useState(false);
 
   useEffect(() => {
+    async function checkPermissions() {
+      const { status: cameraStatus } = await ImagePicker.getCameraPermissionsAsync();
+      const { status: cameraRollStatus } = await ImagePicker.getMediaLibraryPermissionsAsync();
+
+      setCameraPermission(cameraStatus === 'granted');
+      setCameraRollPermission(cameraRollStatus === 'granted');
+    }
+
     checkPermissions();
   }, []);
-
-  async function checkPermissions() {
-    const { status: cameraStatus } = await ImagePicker.getCameraPermissionsAsync();
-    const { status: cameraRollStatus } = await ImagePicker.getMediaLibraryPermissionsAsync();
-    
-    setCameraPermission(cameraStatus === 'granted');
-    setCameraRollPermission(cameraRollStatus === 'granted');
-  }
 
   async function requestCameraPermission() {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
@@ -46,10 +44,16 @@ export function CameraProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function pickFromCamera() {
+    if (!cameraPermission) {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      setCameraPermission(status === 'granted');
+      if (status !== 'granted') return;
+    }
+
     const result = await ImagePicker.launchCameraAsync({
       allowsEditing: false,
       quality: 0.8,
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
     });
 
     if (!result.canceled) {
@@ -58,30 +62,21 @@ export function CameraProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function pickFromCameraRoll() {
+    if (!cameraRollPermission) {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      setCameraRollPermission(status === 'granted');
+      if (status !== 'granted') return;
+    }
+
     const result = await ImagePicker.launchImageLibraryAsync({
       allowsEditing: false,
       quality: 0.8,
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
     });
 
     if (!result.canceled) {
       setImageUri(result.assets[0].uri);
     }
-  }
-
-  async function uploadImage(): Promise<{ url: string }> {
-    if (!imageUri) {
-      throw new Error('No image to upload');
-    }
-
-    const { uploadImageToImageKit } = await import('@/lib/imagekit');
-    const { url } = await uploadImageToImageKit(imageUri);
-    return { url };
-  }
-
-  function getThumbnailUrl(url: string): string {
-    const { getImageKitUrl } = require('@/lib/imagekit');
-    return getImageKitUrl(url, 'thumbnail');
   }
 
   function clearImage() {
@@ -102,8 +97,6 @@ export function CameraProvider({ children }: { children: React.ReactNode }) {
     requestCameraRollPermission,
     pickFromCamera,
     pickFromCameraRoll,
-    uploadImage,
-    getThumbnailUrl,
     isBlurry,
     clearImage,
   };

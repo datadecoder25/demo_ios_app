@@ -1,309 +1,239 @@
-import { useState, useEffect } from 'react';
-import { View, StyleSheet, Alert, ScrollView, Text, Pressable, ActivityIndicator, Platform } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { router } from 'expo-router';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+
+import { ResultSheet } from '@/components/camera/ResultSheet';
+import { ScanningCard } from '@/components/camera/ScanningCard';
+import { PrimaryButton, SecondaryButton } from '@/components/kit';
+import { colors, fonts, radius, screenPadding } from '@/constants/design';
 import { useCamera } from '@/contexts/CameraContext';
-import { uploadImageToImageKit } from '@/lib/imagekit';
-import { creditTransactionApi } from '@/lib/db';
+import { mealTitle, useMealAnalysis } from '@/hooks/useMealAnalysis';
 
-import { useUser } from '@/contexts/UserContext';
+const placeholderPhoto = require('../../design/food_photo.jpg');
 
+/** AI Meal Camera (design #15) with the AI Result Modal (design #16) as a bottom sheet. */
 export default function CameraScreen() {
-  const { user } = useUser();
-  const { 
-    imageUri, 
-    cameraPermission, 
-    cameraRollPermission,
-    requestCameraPermission,
-    requestCameraRollPermission,
-    pickFromCamera,
-    pickFromCameraRoll,
-    uploadImage,
-    isBlurry,
-    clearImage
-  } = useCamera();
+  const { imageUri, pickFromCamera, pickFromCameraRoll, clearImage } = useCamera();
+  const { status, credits, analysis, error, insufficientCredits, saveToDiary, isSaving, saveError } =
+    useMealAnalysis(imageUri);
 
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [hasImage, setHasImage] = useState(false);
-  const [isBlurryImage, setIsBlurryImage] = useState(false);
-  const [credits, setCredits] = useState(4);
-
-  useEffect(() => {
-    if (imageUri) {
-      setHasImage(true);
-      checkBlur();
+  // Dismiss the modal back to the tabs; replace('/') would stack a second copy of them.
+  // Home reloads on focus, so a saved meal shows up immediately.
+  function close() {
+    clearImage();
+    if (router.canGoBack()) {
+      router.back();
     } else {
-      setHasImage(false);
-      setIsBlurryImage(false);
-    }
-  }, [imageUri]);
-
-  useEffect(() => {
-    if (user) {
-      loadCredits();
-    }
-  }, [user]);
-
-  async function loadCredits() {
-    if (!user) return;
-
-    const { data } = await creditTransactionApi.getByUserId(user.id);
-    if (data) {
-      const totalCredits = data.reduce((sum, tx) => sum + tx.amount, 0);
-      setCredits(totalCredits);
+      router.replace('/');
     }
   }
 
-  async function checkBlur() {
-    if (imageUri) {
-      setIsBlurryImage(isBlurry(imageUri));
+  async function handleSave() {
+    if (await saveToDiary()) {
+      close();
     }
   }
-
-  const handlePhotoTaken = async () => {
-    if (!hasImage) return;
-
-    if (isBlurryImage) {
-      Alert.alert(
-        'Blurry Image',
-        'This image appears to be blurry. Please take a clearer photo for accurate analysis.',
-        [
-          { text: 'Retake', style: 'cancel', onPress: clearImage },
-          { text: 'Continue Anyway', onPress: analyzeMeal },
-        ]
-      );
-    } else {
-      analyzeMeal();
-    }
-  };
-
-  async function analyzeMeal() {
-    if (!imageUri) return;
-
-    setIsProcessing(true);
-
-    try {
-      if (credits < 5 && user) {
-        Alert.alert(
-          'Insufficient Credits',
-          'You need at least 5 credits to analyze a meal. Please purchase more credits.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Buy Credits', onPress: () => router.push('/profile' as any) },
-          ]
-        );
-        setIsProcessing(false);
-        return;
-      }
-
-      const { url } = await uploadImage();
-      router.push(`/analysis/${encodeURIComponent(url)}` as any);
-      clearImage();
-
-    } catch (error) {
-      console.error('Photo processing error:', error);
-      Alert.alert('Error', 'Failed to process photo. Please try again.');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleManualEntry = () => {
-    Alert.alert('Coming Soon', 'Manual entry will be available in a future update.');
-  };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollView}>
-        {!hasImage ? (
-          <View style={styles.header}>
-            <Text style={styles.title}>New Meal</Text>
-            <Text style={styles.subtitle}>
-              Take a photo of your meal to get AI-powered nutrition analysis.
-            </Text>
-          </View>
-        ) : (
-          <View style={styles.previewHeader}>
-            <Text style={styles.previewTitle}>Photo Preview</Text>
-            <Pressable onPress={clearImage}>
-              <Text style={styles.cancelButton}>Cancel</Text>
-            </Pressable>
-          </View>
-        )}
+    <View style={styles.container}>
+      {imageUri ? (
+        <Image source={{ uri: imageUri }} style={StyleSheet.absoluteFill} contentFit="cover" />
+      ) : (
+        <>
+          <Image source={placeholderPhoto} style={StyleSheet.absoluteFill} contentFit="cover" blurRadius={6} />
+          <View style={[StyleSheet.absoluteFill, styles.dim]} />
+        </>
+      )}
 
-        {!hasImage ? (
-          <View style={styles.buttonContainer}>
-            <Pressable
-              style={styles.cameraButton}
-              onPress={pickFromCamera}
-              disabled={!cameraPermission}
-            >
-              <Text style={styles.buttonText}>
-                {cameraPermission ? 'Take Photo' : 'Camera Access Required'}
-              </Text>
-            </Pressable>
-
-            <Pressable
-              style={styles.galleryButton}
-              onPress={pickFromCameraRoll}
-              disabled={!cameraRollPermission}
-            >
-              <Text style={styles.buttonText}>
-                {cameraRollPermission ? 'Choose from Gallery' : 'Gallery Access Required'}
-              </Text>
-            </Pressable>
-
-            <Pressable
-              style={styles.manualButton}
-              onPress={handleManualEntry}
-            >
-              <Text style={styles.buttonText}>Manual Entry</Text>
-            </Pressable>
-          </View>
-        ) : (
-          <View style={styles.imageContainer}>
-            <Text style={styles.previewImage}>[Image Preview Here]</Text>
-            
-            {isBlurryImage && (
-              <View style={styles.blurBadge}>
-                <Text style={styles.blurText}>Blur Detected</Text>
-              </View>
-            )}
-          </View>
-        )}
-
-        {hasImage && (
-          <View style={styles.previewActions}>
-            <Pressable
-              style={styles.confirmButton}
-              onPress={handlePhotoTaken}
-              disabled={isProcessing}
-            >
-              <Text style={styles.buttonText}>
-                {isProcessing ? 'Analyzing...' : 'Analyze Photo'}
-              </Text>
-            </Pressable>
-          </View>
-        )}
-
-        <View style={styles.creditsInfo}>
-          <Text style={styles.creditsText}>
-            {credits < 5 ? '⚠️ ' : '✓ '}{credits} credits available
-          </Text>
+      <SafeAreaView style={styles.fill} edges={['top']}>
+        <View style={styles.topBar}>
+          <Pressable onPress={close} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close camera">
+            <Ionicons name="close" size={28} color={colors.white} />
+          </Pressable>
+          <Ionicons name="flash-outline" size={22} color={colors.white} />
         </View>
-      </ScrollView>
-    </SafeAreaView>
+
+        {status === 'idle' && (
+          <View style={styles.pick}>
+            <View style={styles.pickHeader}>
+              <View style={styles.scanIcon}>
+                <Ionicons name="scan-outline" size={34} color={colors.white} />
+              </View>
+              <Text style={styles.pickTitle}>Scan your meal</Text>
+              <Text style={styles.pickSubtitle}>
+                Snap or upload a photo and AI will estimate calories and macros.
+              </Text>
+              {credits !== null && (
+                <View style={styles.creditsPill}>
+                  <Ionicons name="sparkles" size={14} color={colors.white} />
+                  <Text style={styles.creditsText}>
+                    {credits} {credits === 1 ? 'credit' : 'credits'} left
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            <View style={styles.pickActions}>
+              <PrimaryButton title="Take Photo" icon="camera" onPress={pickFromCamera} />
+              <SecondaryButton title="Choose from Gallery" icon="images-outline" onPress={pickFromCameraRoll} />
+            </View>
+          </View>
+        )}
+
+        {status === 'scanning' && (
+          <View style={styles.centered}>
+            <ScanningCard />
+          </View>
+        )}
+
+        {status === 'error' && (
+          <View style={styles.centered}>
+            <View style={styles.errorCard}>
+              <Ionicons name="alert-circle" size={36} color={colors.amber} />
+              <Text style={styles.errorTitle}>{insufficientCredits ? 'Out of credits' : 'Analysis failed'}</Text>
+              <Text style={styles.errorMessage}>{error}</Text>
+              <View style={styles.errorActions}>
+                {insufficientCredits && (
+                  <PrimaryButton title="Buy Credits" icon="sparkles" onPress={() => router.push('/paywall')} />
+                )}
+                <SecondaryButton title="Try Another Photo" onPress={clearImage} />
+              </View>
+            </View>
+          </View>
+        )}
+      </SafeAreaView>
+
+      {status === 'done' && imageUri && analysis && (
+        <View style={styles.sheetWrap}>
+          <ResultSheet
+            imageUri={imageUri}
+            title={mealTitle(analysis)}
+            analysis={analysis}
+            onSave={handleSave}
+            onClose={close}
+            isSaving={isSaving}
+            saveError={saveError}
+          />
+        </View>
+      )}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: colors.navy,
   },
-  scrollView: {
-    paddingBottom: 100,
+  fill: {
+    flex: 1,
   },
-  header: {
-    padding: 20,
-    alignItems: 'center',
+  dim: {
+    backgroundColor: 'rgba(11, 27, 63, 0.72)',
   },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
-  },
-  buttonContainer: {
-    padding: 20,
-    gap: 16,
-  },
-  cameraButton: {
-    backgroundColor: '#208AEF',
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    borderRadius: 12,
-  },
-  galleryButton: {
-    backgroundColor: '#7B1FA2',
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    borderRadius: 12,
-  },
-  manualButton: {
-    borderWidth: 2,
-    borderColor: '#757575',
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    borderRadius: 12,
-  },
-  buttonText: {
-    color: '#fff',
-    textAlign: 'center',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  previewHeader: {
+  topBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 16,
-    backgroundColor: '#f5f5f5',
+    paddingHorizontal: screenPadding,
+    paddingVertical: 12,
   },
-  previewTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
+  pick: {
+    flex: 1,
+    justifyContent: 'space-between',
+    paddingHorizontal: screenPadding,
+    paddingBottom: 32,
+    width: '100%',
+    maxWidth: 520,
+    alignSelf: 'center',
   },
-  cancelButton: {
-    color: '#f44336',
-  },
-  imageContainer: {
+  pickHeader: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    position: 'relative',
-    padding: 20,
+    gap: 12,
   },
-  previewImage: {
-    width: '100%',
-    height: 300,
-    backgroundColor: '#e0e0e0',
-    borderRadius: 8,
-    textAlign: 'center',
-    lineHeight: 300,
-  },
-  blurBadge: {
-    position: 'absolute',
-    top: 16,
-    right: 16,
-    backgroundColor: '#f44336',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  blurText: {
-    color: '#fff',
-    fontWeight: 'bold',
-  },
-  previewActions: {
-    padding: 20,
-  },
-  confirmButton: {
-    backgroundColor: '#208AEF',
-    paddingVertical: 16,
-    borderRadius: 12,
-  },
-  creditsInfo: {
-    padding: 16,
-    backgroundColor: '#e8f5e9',
+  scanIcon: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: colors.primary,
     alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  pickTitle: {
+    fontFamily: fonts.bold,
+    fontSize: 26,
+    color: colors.white,
+  },
+  pickSubtitle: {
+    fontFamily: fonts.regular,
+    fontSize: 15,
+    lineHeight: 22,
+    color: 'rgba(255,255,255,0.8)',
+    textAlign: 'center',
+    maxWidth: 300,
+  },
+  creditsPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    backgroundColor: 'rgba(255,255,255,0.16)',
   },
   creditsText: {
-    fontWeight: '600',
-    fontSize: 16,
+    fontFamily: fonts.medium,
+    fontSize: 13,
+    color: colors.white,
+  },
+  pickActions: {
+    gap: 12,
+  },
+  centered: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: screenPadding,
+    width: '100%',
+    maxWidth: 520,
+    alignSelf: 'center',
+  },
+  errorCard: {
+    backgroundColor: colors.darkOverlay,
+    borderRadius: radius.lg,
+    padding: 24,
+    alignItems: 'center',
+    gap: 10,
+  },
+  errorTitle: {
+    fontFamily: fonts.semibold,
+    fontSize: 18,
+    color: colors.white,
+  },
+  errorMessage: {
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    lineHeight: 20,
+    color: 'rgba(255,255,255,0.8)',
+    textAlign: 'center',
+  },
+  errorActions: {
+    alignSelf: 'stretch',
+    gap: 12,
+    marginTop: 8,
+  },
+  sheetWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    width: '100%',
+    maxWidth: 520,
+    alignSelf: 'center',
   },
 });
