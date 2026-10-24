@@ -35,28 +35,22 @@ function RootNavigator() {
     <>
       <StatusBar style="dark" />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.surface } }}>
-        {/* Google/Apple sign-in lands here on web before a session exists. */}
-        <Stack.Screen name="sso-callback" />
-        {/* Public, signed in or not: linked from sign-up, Profile and the store listings. */}
-        <Stack.Screen name="privacy" />
-        <Stack.Screen name="terms" />
-
-        <Stack.Protected guard={!isSignedIn}>
+        {/*
+          Each group names where to go when its guard fails. Without redirectTo the router falls
+          back to the first unguarded route in its own sort order (which was /terms).
+        */}
+        <Stack.Protected guard={!isSignedIn} redirectTo="/">
           <Stack.Screen name="welcome" />
           <Stack.Screen name="sign-in" />
           <Stack.Screen name="sign-up" />
           <Stack.Screen name="reset-password" />
         </Stack.Protected>
 
-        <Stack.Protected guard={isSignedIn}>
-          <Stack.Screen name="delete-account" />
-        </Stack.Protected>
-
-        <Stack.Protected guard={isSignedIn && needsOnboarding}>
+        <Stack.Protected guard={isSignedIn && needsOnboarding} redirectTo={isSignedIn ? '/' : '/welcome'}>
           <Stack.Screen name="onboarding" options={{ gestureEnabled: false }} />
         </Stack.Protected>
 
-        <Stack.Protected guard={isSignedIn && !needsOnboarding}>
+        <Stack.Protected guard={isSignedIn && !needsOnboarding} redirectTo={isSignedIn ? '/onboarding' : '/welcome'}>
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="camera" options={{ presentation: 'fullScreenModal', gestureEnabled: false }} />
           <Stack.Screen name="paywall" options={{ presentation: 'modal' }} />
@@ -67,6 +61,16 @@ function RootNavigator() {
           <Stack.Screen name="check-in" options={{ presentation: 'modal' }} />
           <Stack.Screen name="edit-profile" />
         </Stack.Protected>
+
+        <Stack.Protected guard={isSignedIn} redirectTo="/welcome">
+          <Stack.Screen name="delete-account" />
+        </Stack.Protected>
+
+        {/* Google/Apple sign-in lands here on web before a session exists. */}
+        <Stack.Screen name="sso-callback" />
+        {/* Public, signed in or not: linked from sign-up, Profile and the store listings. */}
+        <Stack.Screen name="privacy" />
+        <Stack.Screen name="terms" />
       </Stack>
     </>
   );

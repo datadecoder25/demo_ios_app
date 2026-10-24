@@ -11,8 +11,9 @@
  * 402 when the user has no credits left.
  */
 
-import { bearerToken, getUserId, isAuthConfigured, json } from '@/server/auth';
+import { getUserId, isAuthConfigured, json } from '@/server/auth';
 import { creditBalance, spendCredit } from '@/server/credits';
+import { sql } from '@/server/db';
 import { isStorageConfigured, readPhoto, signedPhotoUrl, storePhoto } from '@/server/storage';
 import type { AnalyzeMealOutput, AnalyzeMealPayload } from '@/trigger/analyze-meal';
 
@@ -78,8 +79,8 @@ async function runAnalyzeMeal(payload: AnalyzeMealPayload): Promise<RunResult> {
 }
 
 export async function POST(request: Request) {
-  if (!isAuthConfigured || !isStorageConfigured || !process.env.TRIGGER_SECRET_KEY) {
-    console.error('analyze-meal: missing EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY, NEON_STORAGE_BUCKET or TRIGGER_SECRET_KEY');
+  if (!isAuthConfigured || !isStorageConfigured || !sql || !process.env.TRIGGER_SECRET_KEY) {
+    console.error('analyze-meal: missing EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY, NEON_STORAGE_BUCKET, DATABASE_URL or TRIGGER_SECRET_KEY');
     return json({ message: 'Meal analysis is not configured on the server.' }, 500);
   }
 
@@ -93,9 +94,8 @@ export async function POST(request: Request) {
     return json({ message: result.error }, result.status);
   }
 
-  const token = bearerToken(request) as string;
   try {
-    if ((await creditBalance(token)) < 1) {
+    if ((await creditBalance(userId)) < 1) {
       return json({ message: 'You have no AI scans left this month.', code: 'NO_CREDITS' }, 402);
     }
 
@@ -118,7 +118,7 @@ export async function POST(request: Request) {
     }
 
     // Spent after the fact, so failed or timed-out analyses never cost a credit.
-    const creditsLeft = await spendCredit(token, photoKey);
+    const creditsLeft = await spendCredit(userId, photoKey);
     if (creditsLeft < 0) {
       // Another scan used the last credit while this one ran.
       return json({ message: 'You have no AI scans left this month.', code: 'NO_CREDITS' }, 402);
