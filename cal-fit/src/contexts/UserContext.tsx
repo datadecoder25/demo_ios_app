@@ -79,7 +79,12 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       try {
         // First, so data from a previous account is linked before we look for a profile.
         await syncAccount();
-        await creditTransactionApi.claimFreeCredits();
+        // Idempotent, so one retry is safe; a failed claim would otherwise leave a new user
+        // with no scans until the next app start.
+        if ((await creditTransactionApi.claimFreeCredits()).error) {
+          const { error: claimError } = await creditTransactionApi.claimFreeCredits();
+          if (claimError) console.error('Free scans could not be claimed:', claimError);
+        }
         const { data, error } = await profileApi.getByUserId(id);
         if (error) throw new AuthUnavailableError('Could not load your profile. Please try again.');
         if (cancelled) return;

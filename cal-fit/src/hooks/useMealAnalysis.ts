@@ -1,4 +1,7 @@
+import * as Crypto from 'expo-crypto';
+import { File } from 'expo-file-system';
 import { useEffect, useRef, useState } from 'react';
+import { Platform } from 'react-native';
 
 import { useUser } from '@/contexts/UserContext';
 import { nextCreditRenewal } from '@/hooks/useCredits';
@@ -28,9 +31,13 @@ async function sumCredits(userId: string): Promise<number | null> {
   return data ? data.reduce((sum, tx) => sum + tx.amount, 0) : null;
 }
 
+/** SHA-256 of the photo's bytes. React Native has no crypto.subtle, so expo-crypto does it. */
 async function hashImage(uri: string): Promise<string> {
-  const blob = await (await fetch(uri)).blob();
-  const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
+  const bytes =
+    Platform.OS === 'web'
+      ? new Uint8Array(await (await (await fetch(uri)).blob()).arrayBuffer())
+      : await new File(uri).bytes();
+  const digest = await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, bytes);
   return Array.from(new Uint8Array(digest))
     .map(b => b.toString(16).padStart(2, '0'))
     .join('');
@@ -87,8 +94,12 @@ export function useMealAnalysis(imageUri: string | null) {
       }
 
       try {
-        const hash = await hashImage(uri);
-        const { data: cached } = await imageCacheApi.getByHash(hash);
+        // The cache only saves a scan, so a photo that can't be hashed is analyzed normally.
+        const hash = await hashImage(uri).catch(error => {
+          console.warn('Could not hash photo; skipping the analysis cache:', error);
+          return null;
+        });
+        const cached = hash ? (await imageCacheApi.getByHash(hash)).data : null;
         if (cached && cached.length > 0) {
           setResult({ uri, analysis: cached[0].analysis_json, photoKey: null });
           return;
@@ -104,7 +115,7 @@ export function useMealAnalysis(imageUri: string | null) {
 
         // The server spends the credit once the analysis succeeds.
         const { analysis, photoKey, creditsLeft } = await triggerAiAnalysis(uri);
-        await imageCacheApi.create(photoKey, hash, analysis);
+        if (hash) await imageCacheApi.create(photoKey, hash, analysis);
 
         setCredits(creditsLeft);
         setResult({ uri, analysis, photoKey });

@@ -74,7 +74,8 @@ async function fetchNeon<T>(endpoint: string, options?: RequestInit, attempt = 0
         if (response.status === 401) await clearAccessToken();
         return retry();
       }
-      throw new Error(`Neon API error: ${response.status} ${response.statusText}`);
+      const detail = (await response.text().catch(() => '')).slice(0, 300);
+      throw new Error(`Neon API error: ${response.status} ${response.statusText} ${detail}`.trim());
     }
 
     const data = await response.json() as T[];
