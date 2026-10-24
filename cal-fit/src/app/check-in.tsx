@@ -32,16 +32,13 @@ export default function CheckInScreen() {
 
   async function pick(source: 'camera' | 'library') {
     setError(null);
-    const permission =
-      source === 'camera'
-        ? await ImagePicker.requestCameraPermissionsAsync()
-        : await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (permission.status !== 'granted') {
-      Alert.alert(
-        source === 'camera' ? 'Camera access needed' : 'Photo access needed',
-        'Allow access in Settings to add a progress photo.'
-      );
-      return;
+    // Only the camera needs a permission; the system photo picker doesn't.
+    if (source === 'camera') {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (permission.status !== 'granted') {
+        Alert.alert('Camera access needed', 'Allow camera access in Settings to add a progress photo.');
+        return;
+      }
     }
 
     const result =

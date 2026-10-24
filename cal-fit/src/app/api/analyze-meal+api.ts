@@ -3,7 +3,7 @@
  * Server-only (Expo API route): secrets below never reach the client bundle.
  *
  * Body: multipart/form-data with a `photo` image file.
- * Auth: `Authorization: Bearer <Neon Auth JWT>`.
+ * Auth: `Authorization: Bearer <Clerk session JWT>`.
  *
  * Checks the user has an AI credit, stores the photo in Neon object storage, runs the
  * `analyze-meal` Trigger.dev task on a short-lived presigned URL, spends the credit only
@@ -79,7 +79,7 @@ async function runAnalyzeMeal(payload: AnalyzeMealPayload): Promise<RunResult> {
 
 export async function POST(request: Request) {
   if (!isAuthConfigured || !isStorageConfigured || !process.env.TRIGGER_SECRET_KEY) {
-    console.error('analyze-meal: missing EXPO_PUBLIC_NEON_AUTH_URL, NEON_STORAGE_BUCKET or TRIGGER_SECRET_KEY');
+    console.error('analyze-meal: missing EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY, NEON_STORAGE_BUCKET or TRIGGER_SECRET_KEY');
     return json({ message: 'Meal analysis is not configured on the server.' }, 500);
   }
 

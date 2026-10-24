@@ -1,9 +1,12 @@
+import { useAuth, useUser as useClerkUser } from '@clerk/expo';
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { router } from 'expo-router';
 
-import * as auth from '@/lib/auth';
+import { deleteAccount as deleteAccountOnServer, syncAccount } from '@/lib/account';
+import { AuthUnavailableError } from '@/lib/auth';
 import { creditTransactionApi, profileApi, Profile, ProfileInput, weightApi } from '@/lib/db';
 import { calculateTargets } from '@/lib/nutrition';
+import { setPurchasesUser } from '@/lib/purchases';
 
 interface User {
   id: string;
@@ -32,9 +35,9 @@ interface UserContextType {
   logWeight: (weightKg: number, photoKey?: string | null) => Promise<void>;
   /** Removes a check-in; the profile weight falls back to the latest remaining one. */
   deleteWeightLog: (id: string) => Promise<void>;
-  signIn: (email: string, password: string) => Promise<void>;
-  signUp: (name: string, email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
+  /** Permanently deletes the account and all its data, then returns to the welcome screen. */
+  deleteAccount: () => Promise<void>;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
@@ -55,90 +58,87 @@ function withTarget(current: Profile | null, data: ProfileInput): ProfileInput {
   return { ...data, daily_calorie_target: calories };
 }
 
-function toUser(authUser: auth.AuthUser): User {
-  const [firstName, ...rest] = (authUser.name ?? '').trim().split(/\s+/);
-  return {
-    id: authUser.id,
-    email: authUser.email,
-    firstName: firstName || null,
-    lastName: rest.join(' ') || null,
-    imageUrl: authUser.image,
-  };
-}
-
 export function UserProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  // Clerk owns the session (sign-in screens use its hooks); this context adds the app's own
+  // per-user state: the profile, and a one-time bootstrap after each sign-in.
+  const { isLoaded, isSignedIn, userId, signOut: clerkSignOut } = useAuth();
+  const { user: clerkUser } = useClerkUser();
+
   const [profile, setProfile] = useState<Profile | null>(null);
-
+  // The user id whose bootstrap (account sync, free credits, profile) has finished.
+  const [bootstrappedFor, setBootstrappedFor] = useState<string | null>(null);
   const [startupError, setStartupError] = useState<string | null>(null);
-
-  /** Loads the profile; a failed request throws rather than looking like "no profile yet". */
-  async function loadProfile(userId: string) {
-    const { data, error } = await profileApi.getByUserId(userId);
-    if (error) throw new auth.AuthUnavailableError('Could not load your profile. Please try again.');
-    setProfile(data?.[0] ?? null);
-  }
-
-  // Bumped by retryStartup to re-run the startup effect.
+  // Bumped by retryStartup to re-run the bootstrap.
   const [startupAttempt, setStartupAttempt] = useState(0);
 
   useEffect(() => {
-    async function initializeAuth() {
+    if (!isLoaded || !isSignedIn || !userId) return;
+    let cancelled = false;
+
+    async function bootstrap(id: string) {
       try {
-        const sessionUser = await auth.getSessionUser();
-        if (sessionUser) {
-          creditTransactionApi.claimFreeCredits();
-          const { data, error } = await profileApi.getByUserId(sessionUser.id);
-          if (error) throw new auth.AuthUnavailableError('Could not load your profile. Please try again.');
-          setProfile(data?.[0] ?? null);
-          setUser(toUser(sessionUser));
-        }
+        // First, so data from a previous account is linked before we look for a profile.
+        await syncAccount();
+        await creditTransactionApi.claimFreeCredits();
+        const { data, error } = await profileApi.getByUserId(id);
+        if (error) throw new AuthUnavailableError('Could not load your profile. Please try again.');
+        if (cancelled) return;
+        setProfile(data?.[0] ?? null);
+        setStartupError(null);
+        setBootstrappedFor(id);
       } catch (error) {
-        console.error('Auth initialization error:', error);
-        // Only an explicit "no session" signs the user out; outages keep them on the splash.
-        if (error instanceof auth.AuthUnavailableError) {
-          setStartupError(error.message);
-          return;
+        console.error('Account bootstrap error:', error);
+        if (!cancelled) {
+          setStartupError(error instanceof Error ? error.message : 'Could not load your account. Please try again.');
         }
       }
-      setIsLoading(false);
     }
 
-    initializeAuth();
-  }, [startupAttempt]);
+    bootstrap(userId);
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoaded, isSignedIn, userId, startupAttempt]);
+
+  const user: User | null =
+    isSignedIn && userId && clerkUser
+      ? {
+          id: userId,
+          email: clerkUser.primaryEmailAddress?.emailAddress ?? null,
+          firstName: clerkUser.firstName,
+          lastName: clerkUser.lastName,
+          imageUrl: clerkUser.imageUrl,
+        }
+      : null;
+  const ready = !!user && bootstrappedFor === user.id;
+  const isLoading = !isLoaded || (!!isSignedIn && !ready);
+
+  // Purchases belong to the signed-in user (RevenueCat app user id = Clerk user id).
+  useEffect(() => {
+    setPurchasesUser(ready ? userId ?? null : null);
+  }, [ready, userId]);
 
   function retryStartup() {
     setStartupError(null);
     setStartupAttempt(n => n + 1);
   }
 
-  async function signIn(email: string, password: string) {
-    const authUser = await auth.signInWithEmail(email, password);
-    await loadProfile(authUser.id);
-    setUser(toUser(authUser));
-    await creditTransactionApi.claimFreeCredits();
-    router.replace('/');
-  }
-
-  async function signUp(name: string, email: string, password: string) {
-    const authUser = await auth.signUpWithEmail(name, email, password);
-    setProfile(null);
-    setUser(toUser(authUser));
-    await creditTransactionApi.claimFreeCredits();
-    router.replace('/onboarding');
-  }
-
   async function signOut() {
     try {
-      await auth.signOut();
+      await clerkSignOut();
     } catch (error) {
       console.error('Sign-out error:', error);
     } finally {
-      setUser(null);
       setProfile(null);
+      setBootstrappedFor(null);
       router.replace('/welcome');
     }
+  }
+
+  async function deleteAccount() {
+    await deleteAccountOnServer();
+    // The Clerk user is gone, so this only clears the local session.
+    await signOut();
   }
 
   async function saveProfile(data: ProfileInput) {
@@ -176,19 +176,18 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   }
 
   const value: UserContextType = {
-    user,
-    isSignedIn: !!user,
+    user: ready ? user : null,
+    isSignedIn: ready,
     isLoading,
     startupError,
     retryStartup,
     profile,
-    needsOnboarding: !!user && !profile,
+    needsOnboarding: ready && !profile,
     saveProfile,
     logWeight,
     deleteWeightLog,
-    signIn,
-    signUp,
     signOut,
+    deleteAccount,
   };
 
   return <UserContext.Provider value={value}>{children}</UserContext.Provider>;

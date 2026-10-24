@@ -1,11 +1,12 @@
 /**
  * POST /api/photo-urls
- * Body: { keys: string[] } (max 50). Auth: Neon Auth bearer JWT.
+ * Body: { keys: string[] } (max 50). Auth: Clerk session JWT.
  * Returns { urls: { [key]: signedUrl } } for the keys the caller owns; other keys are left out.
  */
 
 import { getUserId, isAuthConfigured, json } from '@/server/auth';
 import { isStorageConfigured, ownsKey, signedPhotoUrl } from '@/server/storage';
+import { photoOwnerIds } from '@/server/users';
 
 const MAX_KEYS = 50;
 
@@ -25,7 +26,8 @@ export async function POST(request: Request) {
     return json({ message: `Send { keys: string[] } with at most ${MAX_KEYS} keys.` }, 400);
   }
 
-  const owned = keys.filter(key => ownsKey(userId, key));
+  const ownerIds = await photoOwnerIds(userId);
+  const owned = keys.filter(key => ownsKey(ownerIds, key));
   const urls = Object.fromEntries(
     await Promise.all(owned.map(async key => [key, await signedPhotoUrl(key)] as const))
   );

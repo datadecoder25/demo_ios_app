@@ -3,7 +3,13 @@
  * Keys are `<folder>/<userId>/<uuid>.<ext>`, so ownership can be checked from the key alone.
  */
 
-import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  DeleteObjectsCommand,
+  GetObjectCommand,
+  ListObjectsV2Command,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
@@ -62,10 +68,32 @@ export async function storePhoto(folder: PhotoFolder, userId: string, photo: Fil
   return key;
 }
 
-/** True when `key` is one of this user's photos. */
-export function ownsKey(userId: string, key: string): boolean {
+/** True when `key` is a photo owned by one of `ownerIds` (the user, plus a linked legacy account). */
+export function ownsKey(ownerIds: string[], key: string): boolean {
   const [folder, owner, file, ...rest] = key.split('/');
-  return (folder === 'meals' || folder === 'progress') && owner === userId && !!file && rest.length === 0;
+  return (folder === 'meals' || folder === 'progress') && ownerIds.includes(owner) && !!file && rest.length === 0;
+}
+
+/** Deletes every meal and progress photo stored under these owners' folders. */
+export async function deleteUserPhotos(ownerIds: string[]) {
+  if (!bucket) return;
+  for (const owner of ownerIds) {
+    for (const folder of ['meals', 'progress'] satisfies PhotoFolder[]) {
+      let continuationToken: string | undefined;
+      do {
+        const page = await s3.send(new ListObjectsV2Command({
+          Bucket: bucket,
+          Prefix: `${folder}/${owner}/`,
+          ContinuationToken: continuationToken,
+        }));
+        const objects = (page.Contents ?? []).flatMap(object => (object.Key ? [{ Key: object.Key }] : []));
+        if (objects.length > 0) {
+          await s3.send(new DeleteObjectsCommand({ Bucket: bucket, Delete: { Objects: objects, Quiet: true } }));
+        }
+        continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+      } while (continuationToken);
+    }
+  }
 }
 
 /** Short-lived read link for a stored photo. */

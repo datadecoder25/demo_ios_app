@@ -1,15 +1,34 @@
--- CalFit schema for Neon Postgres + Neon Auth + Data API.
--- Users live in neon_auth."user" (managed by Neon Auth); every row here is owned by one of them.
+-- CalFit schema for Neon Postgres + Neon Data API, with Clerk for sign-in.
+-- Users are Clerk users; public.app_user mirrors each one (id = Clerk user id, e.g. user_2ab…).
 -- Row-Level Security enforces ownership via auth.user_id(), which reads the `sub` claim of the
--- JWT the app sends to the Data API.
+-- Clerk session JWT the app sends to the Data API.
+-- Upgrading a database created for Neon Auth? Run db/migrations/2026-10-22-clerk.sql first.
 
 begin;
+
+-- One row per Clerk user, written only by the server (/api/me) from Clerk's Backend API, so
+-- the email is the verified one from Clerk rather than whatever a client sends.
+create table if not exists public.app_user (
+  id text primary key,
+  email text,
+  email_verified boolean not null default false,
+  first_name text,
+  last_name text,
+  image_url text,
+  -- How they sign in, from Clerk: e.g. 'password', 'oauth_google', 'oauth_apple'.
+  sign_in_methods text[] not null default '{}',
+  -- Neon Auth user whose data was moved to this account (see /api/me); claimed at most once.
+  legacy_user_id text unique,
+  created_at timestamptz not null default now(),
+  last_seen_at timestamptz not null default now()
+);
+alter table public.app_user add column if not exists legacy_user_id text unique;
+create index if not exists app_user_email_idx on public.app_user (lower(email));
 
 -- Profile: one per user.
 create table if not exists public.profile (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null unique default (auth.user_id())::uuid
-    references neon_auth."user"(id) on delete cascade,
+  user_id text not null unique default auth.user_id(),
   age integer,
   height numeric,
   weight numeric,
@@ -41,8 +60,7 @@ create trigger profile_set_updated_at before update on public.profile
 -- Meals (photo or manual). Soft-deleted via is_deleted.
 create table if not exists public.meal (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null default (auth.user_id())::uuid
-    references neon_auth."user"(id) on delete cascade,
+  user_id text not null default auth.user_id(),
   photo_url text,
   analysis_json jsonb,
   is_manual boolean not null default false,
@@ -68,8 +86,7 @@ create index if not exists meal_food_meal_idx on public.meal_food (meal_id);
 -- Credit ledger: balance = sum(amount).
 create table if not exists public.credit_transaction (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null default (auth.user_id())::uuid
-    references neon_auth."user"(id) on delete cascade,
+  user_id text not null default auth.user_id(),
   amount integer not null,
   type text not null check (type in ('free', 'purchase', 'used', 'refunded')),
   reference_id text,
@@ -89,6 +106,13 @@ create table if not exists public.image_cache (
 create index if not exists image_cache_hash_idx on public.image_cache (hash, expires_at);
 
 -- Grants: only signed-in users (role `authenticated`) touch app data; `anonymous` gets nothing.
+grant select on public.app_user to authenticated;
+revoke all on public.app_user from anonymous;
+alter table public.app_user enable row level security;
+drop policy if exists app_user_self on public.app_user;
+create policy app_user_self on public.app_user for select to authenticated
+  using (id = (select auth.user_id()));
+
 grant usage on schema public to authenticated;
 grant select, insert, update, delete on public.profile, public.meal, public.meal_food to authenticated;
 grant select on public.credit_transaction to authenticated;
@@ -104,28 +128,28 @@ alter table public.image_cache enable row level security;
 
 drop policy if exists profile_owner on public.profile;
 create policy profile_owner on public.profile for all to authenticated
-  using (user_id = (select auth.user_id())::uuid)
-  with check (user_id = (select auth.user_id())::uuid);
+  using (user_id = (select auth.user_id()))
+  with check (user_id = (select auth.user_id()));
 
 drop policy if exists meal_owner on public.meal;
 create policy meal_owner on public.meal for all to authenticated
-  using (user_id = (select auth.user_id())::uuid)
-  with check (user_id = (select auth.user_id())::uuid);
+  using (user_id = (select auth.user_id()))
+  with check (user_id = (select auth.user_id()));
 
 drop policy if exists meal_food_owner on public.meal_food;
 create policy meal_food_owner on public.meal_food for all to authenticated
   using (exists (
     select 1 from public.meal m
-    where m.id = meal_food.meal_id and m.user_id = (select auth.user_id())::uuid
+    where m.id = meal_food.meal_id and m.user_id = (select auth.user_id())
   ))
   with check (exists (
     select 1 from public.meal m
-    where m.id = meal_food.meal_id and m.user_id = (select auth.user_id())::uuid
+    where m.id = meal_food.meal_id and m.user_id = (select auth.user_id())
   ));
 
 drop policy if exists credit_tx_select_own on public.credit_transaction;
 create policy credit_tx_select_own on public.credit_transaction for select to authenticated
-  using (user_id = (select auth.user_id())::uuid);
+  using (user_id = (select auth.user_id()));
 
 -- No insert policy: every ledger write goes through a security-definer function
 -- (claim_free_credits, spend_credit).
@@ -142,13 +166,13 @@ create policy image_cache_insert on public.image_cache for insert to authenticat
 create or replace function public.claim_free_credits() returns integer
 language plpgsql security definer set search_path = public as $$
 declare
-  uid uuid := (auth.user_id())::uuid;
+  uid text := auth.user_id();
 begin
   if uid is null then
     raise exception 'not authenticated';
   end if;
 
-  perform pg_advisory_xact_lock(hashtext(uid::text));
+  perform pg_advisory_xact_lock(hashtext(uid));
 
   if exists (
     select 1 from credit_transaction
@@ -181,8 +205,7 @@ alter table public.meal add column if not exists meal_type text
 -- Weight check-ins. The latest one is mirrored into profile.weight by the app.
 create table if not exists public.weight_log (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null default (auth.user_id())::uuid
-    references neon_auth."user"(id) on delete cascade,
+  user_id text not null default auth.user_id(),
   weight_kg numeric not null check (weight_kg between 20 and 400),
   photo_key text,
   logged_at timestamptz not null default now()
@@ -198,8 +221,7 @@ where p.weight is not null
 -- One row per user, local day and habit; amount is ml of water or 1 for a completed workout.
 create table if not exists public.habit_log (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null default (auth.user_id())::uuid
-    references neon_auth."user"(id) on delete cascade,
+  user_id text not null default auth.user_id(),
   day date not null,
   habit text not null check (habit in ('water', 'workout')),
   amount numeric not null default 0 check (amount >= 0),
@@ -215,13 +237,13 @@ alter table public.habit_log enable row level security;
 
 drop policy if exists weight_log_owner on public.weight_log;
 create policy weight_log_owner on public.weight_log for all to authenticated
-  using (user_id = (select auth.user_id())::uuid)
-  with check (user_id = (select auth.user_id())::uuid);
+  using (user_id = (select auth.user_id()))
+  with check (user_id = (select auth.user_id()));
 
 drop policy if exists habit_log_owner on public.habit_log;
 create policy habit_log_owner on public.habit_log for all to authenticated
-  using (user_id = (select auth.user_id())::uuid)
-  with check (user_id = (select auth.user_id())::uuid);
+  using (user_id = (select auth.user_id()))
+  with check (user_id = (select auth.user_id()));
 
 -- Streaks and XP for the signed-in user, with days counted in the caller's time zone.
 -- A day counts towards the streak when at least one meal was logged.
@@ -232,7 +254,7 @@ create policy habit_log_owner on public.habit_log for all to authenticated
 create or replace function public.user_stats(tz text default 'UTC') returns json
 language sql stable security definer set search_path = public as $$
   with me as (
-    select (auth.user_id())::uuid as uid,
+    select auth.user_id() as uid,
            (now() at time zone tz)::date as today
   ),
   target as (
@@ -295,7 +317,7 @@ revoke insert on public.credit_transaction from authenticated;
 create or replace function public.credit_balance() returns integer
 language sql stable security definer set search_path = public as $$
   select coalesce(sum(amount), 0)::integer from credit_transaction
-  where user_id = (auth.user_id())::uuid
+  where user_id = auth.user_id()
 $$;
 
 -- Spends one credit if the caller has one. Returns the new balance, or -1 when the
@@ -303,14 +325,14 @@ $$;
 create or replace function public.spend_credit(reference text default null) returns integer
 language plpgsql security definer set search_path = public as $$
 declare
-  uid uuid := (auth.user_id())::uuid;
+  uid text := auth.user_id();
   balance integer;
 begin
   if uid is null then
     raise exception 'not authenticated';
   end if;
 
-  perform pg_advisory_xact_lock(hashtext(uid::text));
+  perform pg_advisory_xact_lock(hashtext(uid));
   select coalesce(sum(amount), 0) into balance from credit_transaction where user_id = uid;
   if balance < 1 then
     return -1;
@@ -329,7 +351,7 @@ notify pgrst, 'reload schema';
 
 -- ---------------------------------------------------------------------------
 -- Marketing: consent lives on the profile; marketing_contacts is the export for
--- campaigns. Emails themselves live in neon_auth."user" (managed by Neon Auth).
+-- campaigns. Emails come from public.app_user (synced from Clerk).
 -- ---------------------------------------------------------------------------
 begin;
 
@@ -357,14 +379,15 @@ create trigger profile_marketing_opt_in before insert or update on public.profil
 
 -- One row per user with what a campaign needs; filter on marketing_opt_in before
 -- sending anything. Not exposed to the app: owner/admin access only.
-create or replace view public.marketing_contacts as
+drop view if exists public.marketing_contacts;
+create view public.marketing_contacts as
 select
   u.id as user_id,
   u.email,
-  u.name,
-  u."emailVerified" as email_verified,
-  u."createdAt" as signed_up_at,
-  (select string_agg(distinct a."providerId", ',') from neon_auth.account a where a."userId" = u.id) as sign_in_methods,
+  nullif(concat_ws(' ', u.first_name, u.last_name), '') as name,
+  u.email_verified,
+  u.created_at as signed_up_at,
+  array_to_string(u.sign_in_methods, ',') as sign_in_methods,
   coalesce(p.marketing_opt_in, false) as marketing_opt_in,
   p.marketing_opt_in_at,
   p.goal,
@@ -374,8 +397,9 @@ select
   p.daily_calorie_target,
   (p.user_id is not null) as completed_onboarding,
   m.meals_logged,
-  m.last_meal_at
-from neon_auth."user" u
+  m.last_meal_at,
+  u.last_seen_at
+from public.app_user u
 left join public.profile p on p.user_id = u.id
 left join lateral (
   select count(*) as meals_logged, max(created_at) as last_meal_at
@@ -387,3 +411,17 @@ revoke all on public.marketing_contacts from public, anonymous, authenticated;
 commit;
 
 notify pgrst, 'reload schema';
+
+-- ---------------------------------------------------------------------------
+-- In-app purchases (RevenueCat): scan packs are granted by the server after it verifies
+-- the purchase with RevenueCat, keyed by store transaction so each is credited once.
+-- reference_id is 'rc:<store transaction id>' for a purchase and 'rc-refund:<id>' for its refund.
+-- ---------------------------------------------------------------------------
+begin;
+
+drop index if exists public.credit_tx_purchase_ref_idx;
+create unique index if not exists credit_tx_store_ref_idx
+  on public.credit_transaction (reference_id)
+  where reference_id like 'rc:%' or reference_id like 'rc-refund:%';
+
+commit;

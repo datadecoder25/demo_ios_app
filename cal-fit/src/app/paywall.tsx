@@ -1,31 +1,120 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { PrimaryButton, Screen } from '@/components/kit';
 import { colors, fonts, radius, shadow, type } from '@/constants/design';
 import { FREE_MONTHLY_CREDITS, useCredits } from '@/hooks/useCredits';
+import { Alert } from '@/lib/alert';
 import { goBack } from '@/lib/navigation';
+import {
+  buyScanPack,
+  getScanPacks,
+  isPurchasingAvailable,
+  PurchaseCancelledError,
+  ScanPackOffer,
+  syncPurchases,
+} from '@/lib/purchases';
 
-// What every account gets today; AI scans are the only metered feature.
+// What every account gets; AI scans are the only metered feature.
 const FREE_FEATURES = [
-  `${FREE_MONTHLY_CREDITS} AI meal scans every month`,
+  `${FREE_MONTHLY_CREDITS} free AI meal scans every month`,
   'Unlimited manual food logging',
   'Daily calorie & macro targets',
   'Streaks, XP and daily tasks',
   'Weight tracking & progress photos',
 ];
 
-const PREMIUM_FEATURES = ['Unlimited AI meal scans', 'Advanced progress analytics', 'Priority support'];
-
 function formatDay(date: Date) {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-/** Plan & credits screen. Purchases aren't available yet, so nothing here pretends to sell. */
+type PacksState =
+  | { status: 'loading' }
+  | { status: 'ready'; packs: ScanPackOffer[] }
+  | { status: 'unavailable'; message: string };
+
+/** Loads the scan packs from the store, via RevenueCat's current offering. */
+function useScanPacks(): PacksState {
+  const [state, setState] = useState<PacksState>(
+    isPurchasingAvailable
+      ? { status: 'loading' }
+      : { status: 'unavailable', message: 'Scan packs aren’t available in this version of the app yet.' }
+  );
+
+  useEffect(() => {
+    if (!isPurchasingAvailable) return;
+    let active = true;
+    getScanPacks()
+      .then(packs => {
+        if (!active) return;
+        setState(
+          packs.length > 0
+            ? { status: 'ready', packs }
+            : { status: 'unavailable', message: 'No scan packs are on sale right now. Please check back later.' }
+        );
+      })
+      .catch(error => {
+        console.error('Loading scan packs failed:', error);
+        if (active) setState({ status: 'unavailable', message: 'Couldn’t reach the store. Please try again later.' });
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  return state;
+}
+
+/** Credits screen: balance, free plan, and scan packs sold as in-app purchases. */
 export default function PaywallScreen() {
-  const { balance, usedThisMonth, renewsOn } = useCredits();
-  const close = () => goBack();
+  const { balance, usedThisMonth, renewsOn, reload } = useCredits();
+  const packsState = useScanPacks();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [isBuying, setIsBuying] = useState(false);
+  const [isRestoring, setIsRestoring] = useState(false);
+
+  const packs = packsState.status === 'ready' ? packsState.packs : [];
+  // Default to the best value (lowest price per scan).
+  const bestValue = packs.reduce<ScanPackOffer | null>(
+    (best, p) => (!best || p.pricePerScan < best.pricePerScan ? p : best),
+    null
+  );
+  const selected = packs.find(p => p.id === selectedId) ?? bestValue;
+
+  async function buy() {
+    if (!selected) return;
+    setIsBuying(true);
+    try {
+      const { balance: newBalance } = await buyScanPack(selected);
+      await reload();
+      Alert.alert('Scans added', `${selected.title} added. You now have ${newBalance} AI scans.`);
+    } catch (error) {
+      if (!(error instanceof PurchaseCancelledError)) {
+        console.error('Purchase failed:', error);
+        Alert.alert('Purchase not completed', error instanceof Error ? error.message : 'Please try again.');
+      }
+    } finally {
+      setIsBuying(false);
+    }
+  }
+
+  async function restore() {
+    setIsRestoring(true);
+    try {
+      const { granted } = await syncPurchases();
+      await reload();
+      Alert.alert(
+        granted > 0 ? 'Scans added' : 'All up to date',
+        granted > 0 ? `${granted} scans from earlier purchases were added.` : 'All your purchases are already in your balance.'
+      );
+    } catch (error) {
+      Alert.alert('Couldn’t check purchases', error instanceof Error ? error.message : 'Please try again.');
+    } finally {
+      setIsRestoring(false);
+    }
+  }
 
   return (
     <Screen
@@ -33,16 +122,22 @@ export default function PaywallScreen() {
       scroll
       footer={
         <>
-          <PrimaryButton title="Got It" onPress={close} />
-          <Text style={styles.footnote}>Free scans renew automatically on the 1st of every month.</Text>
+          {selected ? (
+            <PrimaryButton title={`Buy ${selected.title} • ${selected.price}`} onPress={buy} loading={isBuying} />
+          ) : (
+            <PrimaryButton title="Got It" onPress={() => goBack()} />
+          )}
+          <Text style={styles.footnote}>
+            One-time purchase, no subscription. Purchased scans never expire.
+          </Text>
         </>
       }
     >
       <View style={styles.badge}>
         <Ionicons name="sparkles" size={12} color={colors.white} />
-        <Text style={styles.badgeText}>Free plan</Text>
+        <Text style={styles.badgeText}>AI scans</Text>
       </View>
-      <Text style={styles.title}>Your AI Scans</Text>
+      <Text style={styles.title}>Get More Scans</Text>
       <Text style={styles.subtitle}>Each AI meal scan uses one credit. Manual logging is always free.</Text>
 
       <LinearGradient
@@ -60,46 +155,53 @@ export default function PaywallScreen() {
             {balance === 1 ? 'scan' : 'scans'} left
           </Text>
           <Text style={styles.balanceSub}>
-            {usedThisMonth} used this month • {FREE_MONTHLY_CREDITS} more on {formatDay(renewsOn)}
+            {usedThisMonth} used this month • {FREE_MONTHLY_CREDITS} free on {formatDay(renewsOn)}
           </Text>
         </View>
       </LinearGradient>
 
-      <View style={styles.plans}>
-        <View style={[styles.plan, styles.planCurrent]}>
-          <View style={styles.tag}>
-            <Text style={styles.tagText}>Current</Text>
-          </View>
-          <Text style={styles.planName}>Free</Text>
-          <Text style={styles.planPrice}>$0</Text>
-          <Text style={styles.planPeriod}>{FREE_MONTHLY_CREDITS} scans / month</Text>
+      <Text style={styles.sectionTitle}>Scan packs</Text>
+      {packsState.status === 'loading' && <ActivityIndicator style={styles.loading} color={colors.primary} />}
+      {packsState.status === 'unavailable' && <Text style={styles.unavailable}>{packsState.message}</Text>}
+      {packs.length > 0 && (
+        <View style={styles.plans}>
+          {packs.map(pack => {
+            const isSelected = pack.id === selected?.id;
+            return (
+              <Pressable
+                key={pack.id}
+                onPress={() => setSelectedId(pack.id)}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: isSelected }}
+                style={[styles.plan, isSelected && styles.planSelected]}
+              >
+                {pack.id === bestValue?.id && packs.length > 1 && (
+                  <View style={styles.tag}>
+                    <Text style={styles.tagText}>Best value</Text>
+                  </View>
+                )}
+                <Text style={styles.planName}>{pack.credits} scans</Text>
+                <Text style={styles.planPrice}>{pack.price}</Text>
+                <Text style={styles.planPeriod}>
+                  {pack.pkg.product.currencyCode} {pack.pricePerScan.toFixed(2)} per scan
+                </Text>
+              </Pressable>
+            );
+          })}
         </View>
-        <View style={[styles.plan, styles.planSoon]}>
-          <View style={[styles.tag, styles.tagSoon]}>
-            <Text style={styles.tagText}>Coming soon</Text>
-          </View>
-          <Text style={styles.planName}>Premium</Text>
-          <Text style={styles.planPrice}>Soon</Text>
-          <Text style={styles.planPeriod}>unlimited scans</Text>
-        </View>
-      </View>
+      )}
+      {isPurchasingAvailable && (
+        <Pressable onPress={restore} disabled={isRestoring} accessibilityRole="button" style={styles.restore}>
+          <Text style={styles.restoreText}>{isRestoring ? 'Checking…' : 'Missing scans from a purchase? Check again'}</Text>
+        </Pressable>
+      )}
 
-      <Text style={styles.sectionTitle}>Included in your plan</Text>
+      <Text style={styles.sectionTitle}>Always included</Text>
       <View style={styles.features}>
         {FREE_FEATURES.map(feature => (
           <View key={feature} style={styles.feature}>
             <Ionicons name="checkmark" size={18} color={colors.primary} />
             <Text style={styles.featureText}>{feature}</Text>
-          </View>
-        ))}
-      </View>
-
-      <Text style={styles.sectionTitle}>Coming with Premium</Text>
-      <View style={styles.features}>
-        {PREMIUM_FEATURES.map(feature => (
-          <View key={feature} style={styles.feature}>
-            <Ionicons name="time-outline" size={18} color={colors.textMuted} />
-            <Text style={[styles.featureText, styles.featureSoon]}>{feature}</Text>
           </View>
         ))}
       </View>
@@ -166,7 +268,7 @@ const styles = StyleSheet.create({
   plans: {
     flexDirection: 'row',
     gap: 12,
-    marginTop: 22,
+    marginTop: 16,
   },
   plan: {
     flex: 1,
@@ -179,12 +281,9 @@ const styles = StyleSheet.create({
     minHeight: 120,
     ...shadow,
   },
-  planCurrent: {
+  planSelected: {
     borderColor: colors.primary,
     backgroundColor: '#F7FAFF',
-  },
-  planSoon: {
-    opacity: 0.75,
   },
   tag: {
     position: 'absolute',
@@ -194,9 +293,6 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     paddingHorizontal: 10,
     paddingVertical: 3,
-  },
-  tagSoon: {
-    backgroundColor: colors.textMuted,
   },
   tagText: {
     fontFamily: fonts.semibold,
@@ -233,8 +329,22 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: colors.navy,
   },
-  featureSoon: {
-    color: colors.textSecondary,
+  loading: {
+    marginTop: 16,
+  },
+  unavailable: {
+    ...type.body,
+    marginTop: 8,
+  },
+  restore: {
+    alignSelf: 'center',
+    marginTop: 14,
+    paddingVertical: 4,
+  },
+  restoreText: {
+    fontFamily: fonts.semibold,
+    fontSize: 13,
+    color: colors.primary,
   },
   footnote: {
     ...type.caption,

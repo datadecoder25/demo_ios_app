@@ -17,16 +17,18 @@
       },
       "android": {
         "buildType": "apk"
-      }
+      },
+      "environment": "production"
     },
     "production": {
       "autoIncrement": true,
       "ios": {
-        "resourceClass": "m1-large"
+        "resourceClass": "m-medium"
       },
       "android": {
         "buildType": "app-bundle"
-      }
+      },
+      "environment": "production"
     }
   },
   "submit": {

@@ -127,8 +127,8 @@ export default function CameraScreen() {
               <View style={styles.errorActions}>
                 {insufficientCredits ? (
                   <>
-                    <PrimaryButton title="Log Food Manually" icon="create-outline" onPress={logManually} />
-                    <SecondaryButton title="View Plan" onPress={() => router.push('/paywall')} />
+                    <PrimaryButton title="Get More Scans" icon="sparkles" onPress={() => router.push('/paywall')} />
+                    <SecondaryButton title="Log Food Manually" onPress={logManually} />
                   </>
                 ) : (
                   <SecondaryButton title="Try Another Photo" onPress={clearImage} />

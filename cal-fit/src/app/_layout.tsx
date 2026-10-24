@@ -7,11 +7,14 @@ import {
   PlusJakartaSans_800ExtraBold,
   useFonts,
 } from '@expo-google-fonts/plus-jakarta-sans';
+import { ClerkProvider } from '@clerk/expo';
+import { tokenCache } from '@clerk/expo/token-cache';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 
 import { SplashView } from '@/components/SplashView';
 import { colors } from '@/constants/design';
+import { CLERK_PUBLISHABLE_KEY } from '@/lib/auth';
 import { UserProvider, useUser } from '@/contexts/UserContext';
 import { CameraProvider } from '@/contexts/CameraContext';
 
@@ -32,13 +35,21 @@ function RootNavigator() {
     <>
       <StatusBar style="dark" />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.surface } }}>
-        {/* Opened from the password-reset email, signed in or not. */}
-        <Stack.Screen name="reset-password" />
+        {/* Google/Apple sign-in lands here on web before a session exists. */}
+        <Stack.Screen name="sso-callback" />
+        {/* Public, signed in or not: linked from sign-up, Profile and the store listings. */}
+        <Stack.Screen name="privacy" />
+        <Stack.Screen name="terms" />
 
         <Stack.Protected guard={!isSignedIn}>
           <Stack.Screen name="welcome" />
           <Stack.Screen name="sign-in" />
           <Stack.Screen name="sign-up" />
+          <Stack.Screen name="reset-password" />
+        </Stack.Protected>
+
+        <Stack.Protected guard={isSignedIn}>
+          <Stack.Screen name="delete-account" />
         </Stack.Protected>
 
         <Stack.Protected guard={isSignedIn && needsOnboarding}>
@@ -62,11 +73,17 @@ function RootNavigator() {
 }
 
 export default function RootLayout() {
+  if (!CLERK_PUBLISHABLE_KEY) {
+    return <SplashView error="Sign-in isn't configured: set EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY in .env and restart." />;
+  }
+
   return (
-    <UserProvider>
-      <CameraProvider>
-        <RootNavigator />
-      </CameraProvider>
-    </UserProvider>
+    <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY} tokenCache={tokenCache}>
+      <UserProvider>
+        <CameraProvider>
+          <RootNavigator />
+        </CameraProvider>
+      </UserProvider>
+    </ClerkProvider>
   );
 }

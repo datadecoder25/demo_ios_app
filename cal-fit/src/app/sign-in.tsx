@@ -1,38 +1,29 @@
-import * as Linking from 'expo-linking';
-import { router, useLocalSearchParams } from 'expo-router';
+import { useSignIn } from '@clerk/expo';
+import { router } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, StyleSheet, Text } from 'react-native';
+import { Pressable, StyleSheet, Text } from 'react-native';
 
 import { AuthScaffold, FormError, FormNotice, isValidEmail } from '@/components/auth/AuthScaffold';
 import { PrimaryButton, TextField } from '@/components/kit';
 import { colors, fonts } from '@/constants/design';
-import { useUser } from '@/contexts/UserContext';
-import { requestPasswordReset } from '@/lib/auth';
-
-/** Where the emailed reset link lands; must be a trusted origin in Neon Auth. */
-function resetRedirectUrl() {
-  return Platform.OS === 'web' ? `${window.location.origin}/reset-password` : Linking.createURL('/reset-password');
-}
-
-/** Neon Auth sends social sign-in failures back as /sign-in?error=<code>. */
-function socialErrorMessage(code: string | undefined): string | null {
-  if (!code) return null;
-  if (code === 'access_denied') return 'Google sign-in was cancelled.';
-  if (code === 'account_not_linked') {
-    return 'This email already has a password account. Sign in with your email and password.';
-  }
-  return 'Google sign-in failed. Please try again.';
-}
+import { clerkErrorMessage } from '@/lib/auth';
 
 export default function SignInScreen() {
-  const { signIn } = useUser();
-  const { error: socialError } = useLocalSearchParams<{ error?: string }>();
+  const { signIn } = useSignIn();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  // Set when Clerk asks for an emailed code after the password (new device, or 2-step).
+  const [needsCode, setNeedsCode] = useState(false);
+  const [code, setCode] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [isSendingReset, setIsSendingReset] = useState(false);
+
+  async function finish() {
+    // Once the session is active the root layout moves on to the app (or onboarding).
+    const { error: finalizeError } = await signIn.finalize();
+    if (finalizeError) throw finalizeError;
+  }
 
   async function handleSubmit() {
     if (!email.trim() || !password) {
@@ -45,31 +36,83 @@ export default function SignInScreen() {
     setNotice(null);
 
     try {
-      await signIn(email.trim(), password);
+      const { error: passwordError } = await signIn.password({ emailAddress: email.trim(), password });
+      if (passwordError) throw passwordError;
+
+      if (signIn.status === 'complete') {
+        await finish();
+        return;
+      }
+      if (signIn.status === 'needs_client_trust' || signIn.status === 'needs_second_factor') {
+        const { error: sendError } = await signIn.mfa.sendEmailCode();
+        if (sendError) throw sendError;
+        setNeedsCode(true);
+        setNotice(`We emailed a code to ${email.trim()} to confirm it's you.`);
+        setIsSubmitting(false);
+        return;
+      }
+      throw new Error('This account needs a sign-in step the app doesn’t support yet.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
+      setError(clerkErrorMessage(err));
       setIsSubmitting(false);
     }
   }
 
-  async function handleForgotPassword() {
-    const address = email.trim();
-    setNotice(null);
-    if (!isValidEmail(address)) {
-      setError('Enter your email address above, then tap "Forgot password?" again.');
+  async function handleVerifyCode() {
+    if (!code.trim()) {
+      setError('Enter the code from your email.');
       return;
     }
-
-    setIsSendingReset(true);
+    setIsSubmitting(true);
     setError(null);
     try {
-      await requestPasswordReset(address, resetRedirectUrl());
-      setNotice(`If ${address} has an account, a reset link is on its way. Check your inbox.`);
+      const { error: verifyError } = await signIn.mfa.verifyEmailCode({ code: code.trim() });
+      if (verifyError) throw verifyError;
+      await finish();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not send the reset link. Please try again.');
-    } finally {
-      setIsSendingReset(false);
+      setError(clerkErrorMessage(err, 'That code didn’t work. Please try again.'));
+      setIsSubmitting(false);
     }
+  }
+
+  function startOver() {
+    signIn.reset();
+    setNeedsCode(false);
+    setCode('');
+    setNotice(null);
+    setError(null);
+  }
+
+  function handleForgotPassword() {
+    const address = email.trim();
+    router.push({ pathname: '/reset-password', params: isValidEmail(address) ? { email: address } : {} });
+  }
+
+  if (needsCode) {
+    return (
+      <AuthScaffold
+        title="Check Your Email"
+        subtitle="Enter the code we sent to finish signing in."
+        footerPrompt="Wrong account?"
+        footerAction="Start over"
+        onFooterPress={startOver}
+        showSocial={false}
+      >
+        <TextField
+          label="Verification code"
+          placeholder="123456"
+          value={code}
+          onChangeText={setCode}
+          keyboardType="number-pad"
+          autoComplete="one-time-code"
+          textContentType="oneTimeCode"
+          onSubmitEditing={handleVerifyCode}
+        />
+        <FormNotice message={notice} />
+        <FormError message={error} />
+        <PrimaryButton title="Verify & Sign In" onPress={handleVerifyCode} loading={isSubmitting} />
+      </AuthScaffold>
+    );
   }
 
   return (
@@ -79,7 +122,6 @@ export default function SignInScreen() {
       footerPrompt="Don't have an account?"
       footerAction="Sign Up"
       onFooterPress={() => router.replace('/sign-up')}
-      socialError={socialErrorMessage(socialError)}
     >
       <TextField
         label="Email address"
@@ -102,18 +144,8 @@ export default function SignInScreen() {
         onSubmitEditing={handleSubmit}
       />
 
-      <Pressable
-        onPress={handleForgotPassword}
-        disabled={isSendingReset}
-        accessibilityRole="link"
-        hitSlop={8}
-        style={styles.forgot}
-      >
-        {isSendingReset ? (
-          <ActivityIndicator size="small" color={colors.primary} />
-        ) : (
-          <Text style={styles.forgotText}>Forgot password?</Text>
-        )}
+      <Pressable onPress={handleForgotPassword} accessibilityRole="link" hitSlop={8} style={styles.forgot}>
+        <Text style={styles.forgotText}>Forgot password?</Text>
       </Pressable>
 
       <FormError message={error} />

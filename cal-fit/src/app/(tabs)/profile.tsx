@@ -5,7 +5,8 @@ import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-nat
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Card, ListRow } from '@/components/kit';
-import { colors, fonts, radius, screenPadding } from '@/constants/design';
+import { colors, fonts, radius, screenPadding, type } from '@/constants/design';
+import { HEALTH_DISCLAIMER } from '@/constants/legal';
 import { useUser } from '@/contexts/UserContext';
 import { useCredits } from '@/hooks/useCredits';
 import { useStats } from '@/hooks/useStats';
@@ -142,8 +143,22 @@ export default function ProfileScreen() {
             />
           </View>
           <ListRow icon="speedometer-outline" title="Units" subtitle="Metric (kg, cm)" showChevron={false} />
-          <ListRow icon="log-out-outline" title="Log Out" danger onPress={confirmLogout} />
         </Card>
+
+        <Card style={styles.list}>
+          <ListRow icon="shield-checkmark-outline" title="Privacy Policy" onPress={() => router.push('/privacy')} />
+          <ListRow icon="document-text-outline" title="Terms of Use" onPress={() => router.push('/terms')} />
+          <ListRow icon="log-out-outline" title="Log Out" danger onPress={confirmLogout} />
+          <ListRow
+            icon="trash-outline"
+            title="Delete Account"
+            subtitle="Permanently delete your account and data"
+            danger
+            onPress={() => router.push('/delete-account')}
+          />
+        </Card>
+
+        <Text style={styles.disclaimer}>{HEALTH_DISCLAIMER}</Text>
       </ScrollView>
     </SafeAreaView>
   );
@@ -274,6 +289,11 @@ const styles = StyleSheet.create({
     fontFamily: fonts.semibold,
     fontSize: 14,
     color: colors.navy,
+  },
+  disclaimer: {
+    ...type.caption,
+    textAlign: 'center',
+    paddingHorizontal: 8,
   },
   toggleSubtitle: {
     fontFamily: fonts.regular,

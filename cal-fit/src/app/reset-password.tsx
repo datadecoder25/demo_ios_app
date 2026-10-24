@@ -1,41 +1,75 @@
+import { useSignIn } from '@clerk/expo';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { AuthScaffold, FormError, FormNotice, MIN_PASSWORD_LENGTH } from '@/components/auth/AuthScaffold';
+import {
+  AuthScaffold,
+  FormError,
+  FormNotice,
+  isValidEmail,
+  MIN_PASSWORD_LENGTH,
+} from '@/components/auth/AuthScaffold';
 import { PrimaryButton, TextField } from '@/components/kit';
-import { resetPassword } from '@/lib/auth';
+import { clerkErrorMessage } from '@/lib/auth';
 
-/** Landing page of the emailed reset link: `/reset-password?token=…` (or `?error=INVALID_TOKEN`). */
+/**
+ * Password reset with an emailed code (Clerk): enter email → enter code and a new password.
+ * A successful reset signs the user in. Opened from "Forgot password?" with ?email=… prefilled.
+ */
 export default function ResetPasswordScreen() {
-  const { token, error: linkError } = useLocalSearchParams<{ token?: string; error?: string }>();
+  const { signIn } = useSignIn();
+  const params = useLocalSearchParams<{ email?: string }>();
+  const [email, setEmail] = useState(params.email ?? '');
+  const [codeSent, setCodeSent] = useState(false);
+  const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
-  const [confirm, setConfirm] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [done, setDone] = useState(false);
-  const [error, setError] = useState<string | null>(
-    linkError || !token ? 'This reset link is invalid or has expired. Request a new one from Sign In.' : null
-  );
+  const [error, setError] = useState<string | null>(null);
 
-  async function handleSubmit() {
-    if (!token) return;
-    if (password.length < MIN_PASSWORD_LENGTH) {
-      setError(`Your password needs at least ${MIN_PASSWORD_LENGTH} characters.`);
+  async function sendCode() {
+    const address = email.trim();
+    if (!isValidEmail(address)) {
+      setError('Please enter the email address you signed up with.');
       return;
     }
-    if (password !== confirm) {
-      setError("The passwords don't match.");
-      return;
-    }
-
     setIsSubmitting(true);
     setError(null);
     try {
-      await resetPassword(token, password);
-      setDone(true);
+      const { error: createError } = await signIn.create({ identifier: address });
+      if (createError) throw createError;
+      const { error: sendError } = await signIn.resetPasswordEmailCode.sendCode();
+      if (sendError) throw sendError;
+      setCodeSent(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not reset your password. Please try again.');
+      setError(clerkErrorMessage(err, 'Could not send the code. Please try again.'));
     } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function resetPassword() {
+    if (!code.trim()) {
+      setError('Enter the code from your email.');
+      return;
+    }
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      setError(`Your new password needs at least ${MIN_PASSWORD_LENGTH} characters.`);
+      return;
+    }
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const { error: verifyError } = await signIn.resetPasswordEmailCode.verifyCode({ code: code.trim() });
+      if (verifyError) throw verifyError;
+      const { error: submitError } = await signIn.resetPasswordEmailCode.submitPassword({ password });
+      if (submitError) throw submitError;
+      if (signIn.status !== 'complete') throw new Error('Password updated. Please sign in with your new password.');
+      // Signs the user in; the root layout takes them into the app.
+      const { error: finalizeError } = await signIn.finalize();
+      if (finalizeError) throw finalizeError;
+    } catch (err) {
+      setError(clerkErrorMessage(err, 'Could not reset your password. Please try again.'));
       setIsSubmitting(false);
     }
   }
@@ -43,14 +77,27 @@ export default function ResetPasswordScreen() {
   return (
     <AuthScaffold
       showSocial={false}
-      title="Set a New Password"
-      subtitle="Choose a new password for your Cal-Fit account."
+      title={codeSent ? 'Set a New Password' : 'Reset Your Password'}
+      subtitle={
+        codeSent
+          ? `Enter the code we emailed to ${email.trim()} and choose a new password.`
+          : "We'll email you a code to reset your password."
+      }
       footerPrompt="Remembered it?"
       footerAction="Sign In"
       onFooterPress={() => router.replace('/sign-in')}
     >
-      {!done && token && !linkError && (
+      {codeSent ? (
         <>
+          <TextField
+            label="Code"
+            placeholder="123456"
+            value={code}
+            onChangeText={setCode}
+            keyboardType="number-pad"
+            autoComplete="one-time-code"
+            textContentType="oneTimeCode"
+          />
           <TextField
             label="New password"
             placeholder={`At least ${MIN_PASSWORD_LENGTH} characters`}
@@ -59,28 +106,31 @@ export default function ResetPasswordScreen() {
             password
             autoComplete="new-password"
             textContentType="newPassword"
+            onSubmitEditing={resetPassword}
           />
-          <TextField
-            label="Confirm password"
-            placeholder="Type it again"
-            value={confirm}
-            onChangeText={setConfirm}
-            password
-            autoComplete="new-password"
-            textContentType="newPassword"
-            onSubmitEditing={handleSubmit}
-          />
+          <FormNotice message="Didn't get it? Check spam, or go back and send it again." />
         </>
+      ) : (
+        <TextField
+          label="Email address"
+          placeholder="you@example.com"
+          value={email}
+          onChangeText={setEmail}
+          autoCapitalize="none"
+          autoComplete="email"
+          keyboardType="email-address"
+          textContentType="emailAddress"
+          onSubmitEditing={sendCode}
+        />
       )}
 
       <FormError message={error} />
-      <FormNotice message={done ? 'Your password was updated. Sign in with your new password.' : null} />
 
       <View style={styles.submit}>
-        {done || !token || linkError ? (
-          <PrimaryButton title="Go to Sign In" onPress={() => router.replace('/sign-in')} />
+        {codeSent ? (
+          <PrimaryButton title="Update Password" onPress={resetPassword} loading={isSubmitting} />
         ) : (
-          <PrimaryButton title="Update Password" onPress={handleSubmit} loading={isSubmitting} />
+          <PrimaryButton title="Email Me a Code" onPress={sendCode} loading={isSubmitting} />
         )}
       </View>
     </AuthScaffold>

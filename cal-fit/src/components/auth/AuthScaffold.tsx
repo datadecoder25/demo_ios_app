@@ -1,9 +1,10 @@
-import { ReactNode, useState } from 'react';
+import { router } from 'expo-router';
+import { ReactNode } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { LogoMark, OrDivider, Screen, SocialButton } from '@/components/kit';
+import { SocialSignIn } from '@/components/auth/SocialSignIn';
+import { LogoMark, Screen } from '@/components/kit';
 import { colors, fonts, type } from '@/constants/design';
-import { isSocialSignInSupported, signInWithSocial } from '@/lib/auth';
 import { goBack } from '@/lib/navigation';
 
 interface AuthScaffoldProps {
@@ -13,53 +14,15 @@ interface AuthScaffoldProps {
   footerPrompt: string;
   footerAction: string;
   onFooterPress: () => void;
-  /** Message shown above the social buttons, e.g. a failed Google sign-in. */
-  socialError?: string | null;
-  /** Show "Continue with Google"; off for screens like Reset Password. */
+  /** Show "Continue with Google / Apple"; off for screens like Reset Password. */
   showSocial?: boolean;
 }
 
 const backToWelcome = () => goBack('/welcome');
 
 /**
- * "Continue with Google" (web only). Apple isn't offered: Neon Auth doesn't support it.
- */
-function SocialSignIn({ initialError }: { initialError?: string | null }) {
-  const [error, setError] = useState<string | null>(null);
-  const [isStarting, setIsStarting] = useState(false);
-
-  if (!isSocialSignInSupported) return null;
-
-  async function start() {
-    setError(null);
-    setIsStarting(true);
-    try {
-      await signInWithSocial('google');
-      // The page is navigating to Google; leave the button disabled.
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not start Google sign-in.');
-      setIsStarting(false);
-    }
-  }
-
-  return (
-    <View style={styles.social}>
-      <OrDivider />
-      <SocialButton
-        title={isStarting ? 'Opening Google…' : 'Continue with Google'}
-        icon="logo-google"
-        iconColor="#DB4437"
-        onPress={start}
-        disabled={isStarting}
-      />
-      <FormError message={error ?? initialError ?? null} />
-    </View>
-  );
-}
-
-/**
  * Shared layout for Sign In / Sign Up / Reset Password (design #3, #4): logo, title, form,
- * Google sign-in, footer link.
+ * Google and Apple sign-in, footer link.
  */
 export function AuthScaffold({
   title,
@@ -68,7 +31,6 @@ export function AuthScaffold({
   footerPrompt,
   footerAction,
   onFooterPress,
-  socialError,
   showSocial = true,
 }: AuthScaffoldProps) {
   return (
@@ -82,7 +44,7 @@ export function AuthScaffold({
 
         <View style={styles.form}>{children}</View>
 
-        {showSocial && <SocialSignIn initialError={socialError} />}
+        {showSocial && <SocialSignIn />}
 
         <View style={styles.footer}>
           <Text style={styles.footerText}>{footerPrompt} </Text>
@@ -90,6 +52,20 @@ export function AuthScaffold({
             <Text style={styles.footerLink}>{footerAction}</Text>
           </Pressable>
         </View>
+
+        {showSocial && (
+          <Text style={styles.agreement}>
+            By continuing, you agree to our{' '}
+            <Text style={styles.agreementLink} accessibilityRole="link" onPress={() => router.push('/terms')}>
+              Terms of Use
+            </Text>{' '}
+            and{' '}
+            <Text style={styles.agreementLink} accessibilityRole="link" onPress={() => router.push('/privacy')}>
+              Privacy Policy
+            </Text>
+            .
+          </Text>
+        )}
       </Screen>
     </KeyboardAvoidingView>
   );
@@ -112,16 +88,12 @@ export function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-/** Neon Auth (Better Auth) rejects passwords shorter than this. */
+/** Clerk's default minimum password length. */
 export const MIN_PASSWORD_LENGTH = 8;
 
 const styles = StyleSheet.create({
   fill: {
     flex: 1,
-  },
-  social: {
-    gap: 14,
-    marginTop: 18,
   },
   logo: {
     alignItems: 'center',
@@ -157,6 +129,16 @@ const styles = StyleSheet.create({
     fontFamily: fonts.semibold,
     fontSize: 13,
     color: colors.primary,
+  },
+  agreement: {
+    ...type.caption,
+    textAlign: 'center',
+    marginTop: 16,
+  },
+  agreementLink: {
+    fontFamily: fonts.medium,
+    color: colors.textSecondary,
+    textDecorationLine: 'underline',
   },
   error: {
     fontFamily: fonts.medium,

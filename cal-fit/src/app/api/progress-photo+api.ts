@@ -1,6 +1,6 @@
 /**
  * POST /api/progress-photo
- * Body: multipart/form-data with a `photo` image. Auth: Neon Auth bearer JWT.
+ * Body: multipart/form-data with a `photo` image. Auth: Clerk session JWT.
  * Stores the photo under progress/<userId>/ and returns { photoKey }; the app saves the
  * key on a weight_log row.
  */

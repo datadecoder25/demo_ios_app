@@ -21,7 +21,7 @@ const NO_CREDITS_MESSAGE = () =>
   `You've used this month's free AI scans. They renew on ${nextCreditRenewal().toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
-  })}, and manual logging is always free.`;
+  })}. Get a scan pack to keep going now; manual logging is always free.`;
 
 async function sumCredits(userId: string): Promise<number | null> {
   const { data } = await creditTransactionApi.getByUserId(userId);

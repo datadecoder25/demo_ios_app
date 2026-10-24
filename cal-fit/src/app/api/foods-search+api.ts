@@ -1,6 +1,6 @@
 /**
  * GET /api/foods-search?q=<query>
- * Auth: `Authorization: Bearer <Neon Auth JWT>`.
+ * Auth: `Authorization: Bearer <Clerk session JWT>`.
  *
  * Proxies the Open Food Facts search service and returns
  * { foods: FoodSearchResult[] } with nutrients per 100 g. Products without calories are dropped.

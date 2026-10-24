@@ -1,6 +1,6 @@
 /**
  * Database utilities for Neon Postgres
- * Uses the Neon Data API (PostgREST) with the signed-in user's Neon Auth JWT.
+ * Uses the Neon Data API (PostgREST) with the signed-in user's Clerk session JWT.
  * Row-Level Security in db/schema.sql scopes every query to that user.
  */
 
@@ -53,7 +53,7 @@ async function fetchNeon<T>(endpoint: string, options?: RequestInit, attempt = 0
 
     if (!response.ok) {
       if (attempt === 0 && (response.status === 401 || response.status >= 500)) {
-        if (response.status === 401) clearAccessToken();
+        if (response.status === 401) await clearAccessToken();
         return retry();
       }
       throw new Error(`Neon API error: ${response.status} ${response.statusText}`);

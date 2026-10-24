@@ -6,6 +6,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Card, IconCircle, OptionCard, PrimaryButton, ProgressBar, Screen } from '@/components/kit';
 import { SliderCard } from '@/components/onboarding/SliderCard';
 import { colors, fonts, type } from '@/constants/design';
+import { HEALTH_DISCLAIMER } from '@/constants/legal';
 import { useUser } from '@/contexts/UserContext';
 import { Alert } from '@/lib/alert';
 import {
@@ -223,6 +224,8 @@ export default function OnboardingScreen() {
               Email me tips, recipes and offers from Cal-Fit. You can turn this off any time in Profile.
             </Text>
           </Pressable>
+
+          <Text style={styles.disclaimer}>{HEALTH_DISCLAIMER}</Text>
         </View>
       )}
     </Screen>
@@ -368,5 +371,11 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 13,
     lineHeight: 19,
+  },
+  disclaimer: {
+    ...type.caption,
+    textAlign: 'center',
+    marginTop: 20,
+    paddingHorizontal: 8,
   },
 });

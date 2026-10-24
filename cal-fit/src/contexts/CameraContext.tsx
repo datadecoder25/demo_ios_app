@@ -56,11 +56,7 @@ export function CameraProvider({ children }: { children: React.ReactNode }) {
 
   async function pickFromCameraRoll() {
     setPickError(null);
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Photo access needed', 'Allow photo library access in Settings to choose a meal photo.');
-      return;
-    }
+    // The system photo picker needs no library permission, so there's no prompt to show.
     await handleResult(await ImagePicker.launchImageLibraryAsync(PICKER_OPTIONS));
   }
 
