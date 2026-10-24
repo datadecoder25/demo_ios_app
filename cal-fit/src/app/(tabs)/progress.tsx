@@ -62,7 +62,8 @@ export default function ProgressScreen() {
           } catch {
             Alert.alert('Error', 'Could not remove this check-in. Please try again.');
           }
-          await Promise.all([reload(), reloadStats()]);
+          // Stats reload on their own after the delete.
+          await reload();
         },
       },
     ]);

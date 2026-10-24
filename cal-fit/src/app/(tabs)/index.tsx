@@ -51,10 +51,7 @@ export default function HomeScreen() {
   async function setHabit(habit: 'water' | 'workout', amount: number) {
     if (!(await habits.set(habit, amount))) {
       Alert.alert('Not saved', 'We could not save that. Check your connection and try again.');
-      return;
     }
-    // Workouts earn XP, so refresh the streak card too.
-    if (habit === 'workout') reloadStats();
   }
 
   const calorieProgress = targets.calories > 0 ? eaten.calories / targets.calories : 0;

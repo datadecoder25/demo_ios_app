@@ -15,6 +15,24 @@ interface DbResponse<T> {
 
 const RETRY_DELAY_MS = 800;
 
+// Writes that change streaks or XP (meals, weigh-ins, habits) notify these, so every mounted
+// useStats reloads after the write lands instead of waiting for its screen to regain focus.
+const statsListeners = new Set<() => void>();
+
+/** Subscribes to stats-changing writes; returns the unsubscribe function. */
+export function onStatsChanged(listener: () => void) {
+  statsListeners.add(listener);
+  return () => {
+    statsListeners.delete(listener);
+  };
+}
+
+async function changesStats<T>(request: Promise<DbResponse<T>>): Promise<DbResponse<T>> {
+  const result = await request;
+  if (!result.error) statsListeners.forEach(listener => listener());
+  return result;
+}
+
 async function fetchNeon<T>(endpoint: string, options?: RequestInit, attempt = 0): Promise<DbResponse<T>> {
   if (!NEON_API_URL) {
     console.error('Neon API URL not configured');
@@ -143,10 +161,10 @@ export const mealApi = {
     manual_name?: string | null;
     meal_type?: MealType | null;
   }) {
-    return fetchNeon<Meal>('meal', {
+    return changesStats(fetchNeon<Meal>('meal', {
       method: 'POST',
       body: JSON.stringify(data),
-    });
+    }));
   },
 
   async update(id: string, data: Partial<{
@@ -154,17 +172,17 @@ export const mealApi = {
     manual_name: string | null;
     meal_type: MealType | null;
   }>) {
-    return fetchNeon<Meal>(`meal?id=eq.${id}`, {
+    return changesStats(fetchNeon<Meal>(`meal?id=eq.${id}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
-    });
+    }));
   },
 
   async delete(id: string) {
-    return fetchNeon<Meal>(`meal?id=eq.${id}`, {
+    return changesStats(fetchNeon<Meal>(`meal?id=eq.${id}`, {
       method: 'PATCH',
       body: JSON.stringify({ is_deleted: true }),
-    });
+    }));
   },
 };
 
@@ -262,14 +280,14 @@ export const weightApi = {
   },
 
   async create(data: { weight_kg: number; photo_key?: string | null; logged_at?: string }) {
-    return fetchNeon<WeightLog>('weight_log', {
+    return changesStats(fetchNeon<WeightLog>('weight_log', {
       method: 'POST',
       body: JSON.stringify(data),
-    });
+    }));
   },
 
   async delete(id: string) {
-    return fetchNeon<WeightLog>(`weight_log?id=eq.${id}`, { method: 'DELETE' });
+    return changesStats(fetchNeon<WeightLog>(`weight_log?id=eq.${id}`, { method: 'DELETE' }));
   },
 };
 
@@ -291,11 +309,11 @@ export const habitApi = {
 
   /** Sets the day's amount for a habit (ml of water, or 1/0 for a workout). */
   async set(userId: string, day: string, habit: Habit, amount: number) {
-    return fetchNeon<HabitLog>('habit_log?on_conflict=user_id,day,habit', {
+    return changesStats(fetchNeon<HabitLog>('habit_log?on_conflict=user_id,day,habit', {
       method: 'POST',
       headers: { 'Prefer': 'return=representation,resolution=merge-duplicates' },
       body: JSON.stringify({ user_id: userId, day, habit, amount: Math.max(0, amount), updated_at: new Date().toISOString() }),
-    });
+    }));
   },
 };
 

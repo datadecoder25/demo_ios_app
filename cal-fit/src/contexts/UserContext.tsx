@@ -146,11 +146,13 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     const weightChanged = data.weight != null && Number(data.weight) !== Number(profile?.weight);
     const { data: saved, error } = await profileApi.upsert(user.id, withTarget(profile, data));
     if (error || !saved?.[0]) throw error ?? new Error('Failed to save profile');
-    setProfile(saved[0]);
+    // Recorded before setProfile: finishing onboarding opens Home, whose stats should
+    // already include this first weigh-in.
     if (weightChanged) {
       const { error: logError } = await weightApi.create({ weight_kg: Number(data.weight) });
       if (logError) console.error('Weight check-in failed:', logError);
     }
+    setProfile(saved[0]);
     return saved[0];
   }
 
