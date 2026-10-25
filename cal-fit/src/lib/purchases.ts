@@ -18,6 +18,8 @@ const ANDROID_KEY = process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_KEY;
 const TEST_STORE_KEY = process.env.EXPO_PUBLIC_REVENUECAT_TEST_KEY;
 
 let configuredFor: string | null = null;
+// Setup calls run one at a time, so a sign-out can't interleave with a sign-in's configure.
+let setupQueue: Promise<void> = Promise.resolve();
 
 function apiKey(): string | undefined {
   if (Platform.OS === 'ios') return IOS_KEY || TEST_STORE_KEY;
@@ -29,7 +31,12 @@ function apiKey(): string | undefined {
 export const isPurchasingAvailable = !!apiKey();
 
 /** Configures RevenueCat for the signed-in user (their Clerk user id is the RevenueCat app user id). */
-export async function setPurchasesUser(userId: string | null) {
+export function setPurchasesUser(userId: string | null): Promise<void> {
+  setupQueue = setupQueue.then(() => applyPurchasesUser(userId));
+  return setupQueue;
+}
+
+async function applyPurchasesUser(userId: string | null) {
   const key = apiKey();
   if (!key) return;
 
@@ -61,8 +68,14 @@ export interface ScanPackOffer {
   pkg: PurchasesPackage;
 }
 
-/** Scan packs from the current RevenueCat offering, cheapest per scan last. */
-export async function getScanPacks(): Promise<ScanPackOffer[]> {
+/**
+ * Scan packs from the current RevenueCat offering, smallest first. Sets RevenueCat up for
+ * `userId` first: a screen's effects run before UserProvider's, so the paywall can get
+ * here before the provider has configured it.
+ */
+export async function getScanPacks(userId: string): Promise<ScanPackOffer[]> {
+  await setPurchasesUser(userId);
+  if (configuredFor !== userId) throw new Error('The store isn’t set up for this account.');
   const offerings = await Purchases.getOfferings();
   const packages = offerings.current?.availablePackages ?? [];
   return packages

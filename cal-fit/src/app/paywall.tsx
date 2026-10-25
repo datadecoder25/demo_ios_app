@@ -5,6 +5,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 
 import { PrimaryButton, Screen } from '@/components/kit';
 import { colors, fonts, radius, shadow, type } from '@/constants/design';
+import { useUser } from '@/contexts/UserContext';
 import { FREE_MONTHLY_CREDITS, useCredits } from '@/hooks/useCredits';
 import { Alert } from '@/lib/alert';
 import { goBack } from '@/lib/navigation';
@@ -30,6 +31,19 @@ function formatDay(date: Date) {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
+/** "$0.25" / "₹1.99" in the store's currency; falls back to "USD 0.25" if Intl can't format it. */
+function formatPerScan(amount: number, currencyCode: string) {
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: currencyCode,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    return `${currencyCode} ${amount.toFixed(2)}`;
+  }
+}
+
 type PacksState =
   | { status: 'loading' }
   | { status: 'ready'; packs: ScanPackOffer[] }
@@ -37,6 +51,8 @@ type PacksState =
 
 /** Loads the scan packs from the store, via RevenueCat's current offering. */
 function useScanPacks(): PacksState {
+  const { user } = useUser();
+  const userId = user?.id;
   const [state, setState] = useState<PacksState>(
     isPurchasingAvailable
       ? { status: 'loading' }
@@ -44,9 +60,9 @@ function useScanPacks(): PacksState {
   );
 
   useEffect(() => {
-    if (!isPurchasingAvailable) return;
+    if (!isPurchasingAvailable || !userId) return;
     let active = true;
-    getScanPacks()
+    getScanPacks(userId)
       .then(packs => {
         if (!active) return;
         setState(
@@ -62,7 +78,7 @@ function useScanPacks(): PacksState {
     return () => {
       active = false;
     };
-  }, []);
+  }, [userId]);
 
   return state;
 }
@@ -183,7 +199,7 @@ export default function PaywallScreen() {
                 <Text style={styles.planName}>{pack.credits} scans</Text>
                 <Text style={styles.planPrice}>{pack.price}</Text>
                 <Text style={styles.planPeriod}>
-                  {pack.pkg.product.currencyCode} {pack.pricePerScan.toFixed(2)} per scan
+                  {formatPerScan(pack.pricePerScan, pack.pkg.product.currencyCode)} per scan
                 </Text>
               </Pressable>
             );
