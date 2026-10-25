@@ -87,7 +87,7 @@ export default function DeleteAccountScreen() {
 
       <Text style={styles.note}>
         Purchases made through the App Store or Google Play aren’t refunded automatically. To ask for a refund, contact
-        Apple or Google. You can sign up again later with the same email, but you’ll start from scratch.
+        Apple or Google. You can sign up again later with the same email, but you’ll start from scratch, and this month’s free scans won’t reset.
       </Text>
 
       <FormError message={error} />

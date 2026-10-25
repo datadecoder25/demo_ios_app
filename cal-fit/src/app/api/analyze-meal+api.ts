@@ -20,7 +20,11 @@ import type { AnalyzeMealOutput, AnalyzeMealPayload } from '@/trigger/analyze-me
 const ANALYSIS_TIMEOUT_MS = 90_000;
 // A run that no worker picks up within this window means the worker isn't running.
 const QUEUE_TIMEOUT_MS = 20_000;
-const POLL_INTERVAL_MS = 1000;
+// EAS Hosting runs on Cloudflare Workers, which allow about 50 outgoing requests per
+// invocation. Polling slows from 1s to 4s, so a full 90s wait stays near 25 polls.
+const FIRST_POLL_MS = 1000;
+const POLL_STEP_MS = 500;
+const MAX_POLL_MS = 4000;
 
 // Trigger.dev's REST API is used directly: the SDK's dynamic import("uncrypto") breaks
 // inside Metro-bundled API routes ("Requiring unknown module").
@@ -62,6 +66,7 @@ async function runAnalyzeMeal(payload: AnalyzeMealPayload): Promise<RunResult> {
   });
 
   const startedAt = Date.now();
+  let pollDelay = FIRST_POLL_MS;
   while (Date.now() - startedAt < ANALYSIS_TIMEOUT_MS) {
     const run = await triggerApi<TriggerRun>(`/api/v3/runs/${id}`);
     if (TERMINAL_STATUSES.has(run.status)) return { kind: 'finished', run };
@@ -72,7 +77,8 @@ async function runAnalyzeMeal(payload: AnalyzeMealPayload): Promise<RunResult> {
       await triggerApi(`/api/v2/runs/${id}/cancel`, { method: 'POST' }).catch(() => {});
       return { kind: 'not_started' };
     }
-    await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
+    await new Promise(resolve => setTimeout(resolve, pollDelay));
+    pollDelay = Math.min(pollDelay + POLL_STEP_MS, MAX_POLL_MS);
   }
   console.error(`analyze-meal run ${id} did not finish within ${ANALYSIS_TIMEOUT_MS}ms`);
   return { kind: 'timeout' };

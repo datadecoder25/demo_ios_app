@@ -59,7 +59,7 @@ export const PRIVACY_POLICY: LegalSection[] = [
   {
     heading: 'How long we keep it',
     paragraphs: [
-      'We keep your data while your account exists. When you delete your account in Profile → Delete Account, we delete your account, photos and logs right away. Copies in encrypted backups are removed within 30 days.',
+      'We keep your data while your account exists. When you delete your account in Profile → Delete Account, we delete your account, photos and logs right away. Copies in encrypted backups are removed within 30 days. To stop free scans from being claimed again by deleting and re-creating an account, we keep a one-way hash of your email address and the months it received free scans; it can\u2019t be turned back into your address.',
     ],
   },
   {
@@ -112,7 +112,7 @@ export const TERMS_OF_USE: LegalSection[] = [
   {
     heading: 'AI scans and purchases',
     paragraphs: [
-      'Each account receives a number of free AI scans every month, as shown in the app. Unused free scans do not carry over.',
+      'Each account receives a number of free AI scans every month, as shown in the app. Unused free scans do not carry over. The free allowance is per email address: deleting and re-creating an account, or using an alias of the same address, does not reset it.',
       'You can buy scan packs through the App Store or Google Play. Purchased scans do not expire while your account exists, are not transferable and have no cash value. Deleting your account removes any unused scans.',
       'Purchases are processed by Apple or Google under their terms. Refunds are handled by Apple or Google under their refund policies, except where the law requires otherwise. If a scan fails, it is not deducted.',
     ],
