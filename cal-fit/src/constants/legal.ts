@@ -2,12 +2,12 @@
  * Privacy Policy and Terms of Use, shown in the app at /privacy and /terms (also the public URLs
  * for the App Store and Google Play listings once the web server is hosted).
  *
- * Fill in CONTACT_EMAIL and OPERATOR before submitting to the stores, and have the text reviewed
+ * Fill in OPERATOR before submitting to the stores, and have the text reviewed
  * for the countries you launch in. Update LAST_UPDATED whenever the text changes.
  */
 
 export const OPERATOR = 'Cal-Fit'; // TODO: legal name of the person or company publishing the app.
-export const CONTACT_EMAIL = 'support@example.com'; // TODO: a monitored support address.
+export const CONTACT_EMAIL = 'support@bornomala.site';
 export const LAST_UPDATED = 'October 24, 2026';
 /** Stored with each user's agreement; bump it (with LAST_UPDATED) when the terms change. */
 export const TERMS_VERSION = '2026-10-24';
@@ -145,5 +145,33 @@ export const TERMS_OF_USE: LegalSection[] = [
   {
     heading: 'Contact',
     paragraphs: [`Questions about these terms? Email ${CONTACT_EMAIL}.`],
+  },
+];
+
+/** Public page for Google Play's account deletion link; works without signing in. */
+export const ACCOUNT_DELETION: LegalSection[] = [
+  {
+    heading: 'Delete your account in the app',
+    paragraphs: [
+      'Open Cal-Fit, go to Profile and tap "Delete account", then confirm. Your account and data are deleted right away.',
+    ],
+  },
+  {
+    heading: 'Or ask us to delete it',
+    paragraphs: [
+      `If you can't use the app, email ${CONTACT_EMAIL} from the email address you signed up with and ask us to delete your Cal-Fit account. We'll confirm and delete it within 30 days.`,
+    ],
+  },
+  {
+    heading: 'What gets deleted',
+    paragraphs: [
+      'Your account and sign-in, profile and goals, meals and scan results, meal and progress photos, weigh-ins, water and workout logs, remaining AI scans (including purchased ones) and your email preferences.',
+    ],
+  },
+  {
+    heading: 'What we keep',
+    paragraphs: [
+      'Copies in encrypted backups are removed within 30 days. To prevent abuse of free scans, we keep a one-way hash of your email address and the months it received free scans; it can\u2019t be turned back into your address. Purchase records held by Apple or Google are kept by them under their own policies.',
+    ],
   },
 ];

@@ -9,7 +9,7 @@ import {
 } from '@expo-google-fonts/plus-jakarta-sans';
 import { ClerkProvider } from '@clerk/expo';
 import { tokenCache } from '@clerk/expo/token-cache';
-import { Stack } from 'expo-router';
+import { Stack, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 
 import { SplashView } from '@/components/SplashView';
@@ -18,8 +18,15 @@ import { CLERK_PUBLISHABLE_KEY } from '@/lib/auth';
 import { UserProvider, useUser } from '@/contexts/UserContext';
 import { CameraProvider } from '@/contexts/CameraContext';
 
+// Pages that need no account: they render without waiting for sign-in to load. On the
+// website, production sign-in only works on calfit.bornomala.site, so on cal-fit.expo.app
+// it never finishes loading, but these pages (linked from the Play listing) still show.
+const PUBLIC_ROUTES = new Set(['privacy', 'terms', 'account-deletion']);
+
 function RootNavigator() {
   const { isSignedIn, isLoading, needsOnboarding, startupError, retryStartup } = useUser();
+  const segments = useSegments();
+  const isPublicRoute = PUBLIC_ROUTES.has(segments[0] ?? '');
   const [fontsLoaded] = useFonts({
     PlusJakartaSans_400Regular,
     PlusJakartaSans_500Medium,
@@ -29,7 +36,9 @@ function RootNavigator() {
   });
 
   // Splash until fonts and the stored session are ready, so guards decide with real state.
-  if (isLoading || !fontsLoaded) return <SplashView error={startupError} onRetry={retryStartup} />;
+  if (!fontsLoaded || (isLoading && !isPublicRoute)) {
+    return <SplashView error={startupError} onRetry={retryStartup} />;
+  }
 
   return (
     <>
@@ -71,6 +80,7 @@ function RootNavigator() {
         {/* Public, signed in or not: linked from sign-up, Profile and the store listings. */}
         <Stack.Screen name="privacy" />
         <Stack.Screen name="terms" />
+        <Stack.Screen name="account-deletion" />
       </Stack>
     </>
   );

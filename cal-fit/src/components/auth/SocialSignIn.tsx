@@ -13,10 +13,14 @@ WebBrowser.maybeCompleteAuthSession();
 
 type Provider = 'oauth_google' | 'oauth_apple';
 
-const PROVIDERS: { strategy: Provider; title: string; icon: 'logo-google' | 'logo-apple'; color: string }[] = [
+const ALL_PROVIDERS: { strategy: Provider; title: string; icon: 'logo-google' | 'logo-apple'; color: string }[] = [
   { strategy: 'oauth_google', title: 'Continue with Google', icon: 'logo-google', color: '#DB4437' },
   { strategy: 'oauth_apple', title: 'Continue with Apple', icon: 'logo-apple', color: colors.navy },
 ];
+
+// Apple sign-in is offered where people expect it (iOS, where the App Store requires it next
+// to Google, and the web); Android shows Google only.
+const PROVIDERS = ALL_PROVIDERS.filter(p => p.strategy !== 'oauth_apple' || Platform.OS !== 'android');
 
 /**
  * "Continue with Google / Apple" via Clerk. Works for new and returning users alike: Clerk
