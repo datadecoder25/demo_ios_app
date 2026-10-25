@@ -9,6 +9,8 @@
 export const OPERATOR = 'Cal-Fit'; // TODO: legal name of the person or company publishing the app.
 export const CONTACT_EMAIL = 'support@example.com'; // TODO: a monitored support address.
 export const LAST_UPDATED = 'October 24, 2026';
+/** Stored with each user's agreement; bump it (with LAST_UPDATED) when the terms change. */
+export const TERMS_VERSION = '2026-10-24';
 
 export interface LegalSection {
   heading: string;

@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
+import { useEffect } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -19,6 +20,10 @@ export default function CameraScreen() {
   const { imageUri, isPreparing, pickError, pickFromCamera, pickFromCameraRoll, clearImage } = useCamera();
   const { status, credits, analysis, error, insufficientCredits, saveToDiary, isSaving, saveError } =
     useMealAnalysis(imageUri);
+
+  // However the screen is left (Android back button, swipe, Close), drop the photo so the
+  // next visit starts at the picker instead of re-running the last analysis.
+  useEffect(() => clearImage, [clearImage]);
 
   // Dismiss the modal back to the tabs; replace('/') would stack a second copy of them.
   // Home reloads on focus, so a saved meal shows up immediately.
@@ -56,7 +61,8 @@ export default function CameraScreen() {
         </>
       )}
 
-      <SafeAreaView style={styles.fill} edges={['top']}>
+      {/* Bottom edge too: on Android the system navigation bar overlaps the pick buttons. */}
+      <SafeAreaView style={styles.fill} edges={['top', 'bottom']}>
         <View style={styles.topBar}>
           <Pressable onPress={close} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close camera">
             <Ionicons name="close" size={28} color={colors.white} />
@@ -128,10 +134,10 @@ export default function CameraScreen() {
                 {insufficientCredits ? (
                   <>
                     <PrimaryButton title="Get More Scans" icon="sparkles" onPress={() => router.push('/paywall')} />
-                    <SecondaryButton title="Log Food Manually" onPress={logManually} />
+                    <LightButton title="Log Food Manually" onPress={logManually} />
                   </>
                 ) : (
-                  <SecondaryButton title="Try Another Photo" onPress={clearImage} />
+                  <LightButton title="Try Another Photo" onPress={clearImage} />
                 )}
               </View>
             </View>
@@ -156,7 +162,38 @@ export default function CameraScreen() {
   );
 }
 
+/** Outlined white button for the dark error card, readable on any phone theme. */
+function LightButton({ title, onPress }: { title: string; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      style={({ pressed }) => [styles.lightButton, pressed && styles.lightButtonPressed]}
+    >
+      <Text style={styles.lightButtonText}>{title}</Text>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
+  lightButton: {
+    minHeight: 54,
+    borderRadius: radius.pill,
+    borderWidth: 1.5,
+    borderColor: colors.white,
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  lightButtonPressed: {
+    opacity: 0.8,
+  },
+  lightButtonText: {
+    fontFamily: fonts.semibold,
+    fontSize: 16,
+    color: colors.white,
+  },
   container: {
     flex: 1,
     backgroundColor: colors.navy,

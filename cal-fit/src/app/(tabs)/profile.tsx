@@ -1,20 +1,21 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { ReactNode, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { Card, ListRow } from '@/components/kit';
+import { Card, ListRow, PrimaryButton } from '@/components/kit';
 import { colors, fonts, radius, screenPadding, type } from '@/constants/design';
-import { HEALTH_DISCLAIMER } from '@/constants/legal';
 import { useUser } from '@/contexts/UserContext';
-import { useCredits } from '@/hooks/useCredits';
+import { FREE_MONTHLY_CREDITS, useCredits } from '@/hooks/useCredits';
 import { useStats } from '@/hooks/useStats';
 import { Alert } from '@/lib/alert';
-import { ACTIVITY_LEVELS, GOALS, levelFor } from '@/lib/nutrition';
+import { GOALS, levelFor } from '@/lib/nutrition';
 
 export default function ProfileScreen() {
   const { user, profile, signOut, saveProfile } = useUser();
+  const { balance, renewsOn } = useCredits();
+  const { stats } = useStats();
   const [isSavingOptIn, setIsSavingOptIn] = useState(false);
 
   async function toggleMarketing(value: boolean) {
@@ -27,8 +28,13 @@ export default function ProfileScreen() {
       setIsSavingOptIn(false);
     }
   }
-  const { balance, renewsOn } = useCredits();
-  const { stats } = useStats();
+
+  const confirmLogout = () => {
+    Alert.alert('Log Out', 'Are you sure you want to log out?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Log Out', style: 'destructive', onPress: signOut },
+    ]);
+  };
 
   const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || 'Your profile';
   const initials =
@@ -37,26 +43,14 @@ export default function ProfileScreen() {
       .map(part => part[0].toUpperCase())
       .join('') || (user?.email?.[0]?.toUpperCase() ?? '?');
 
-  const goalLabel = GOALS.find(g => g.value === profile?.goal)?.label ?? 'No goal set';
   const goalSubtitle = [
-    goalLabel,
-    profile?.goal_weight ? `${Number(profile.goal_weight)} kg` : null,
-    profile?.daily_calorie_target ? `${profile.daily_calorie_target.toLocaleString()} kcal/day` : null,
-    ACTIVITY_LEVELS.find(a => a.value === profile?.activity_level)?.label,
+    GOALS.find(g => g.value === profile?.goal)?.label,
+    profile?.daily_calorie_target ? `${profile.daily_calorie_target.toLocaleString()} kcal a day` : null,
   ]
     .filter(Boolean)
     .join(' • ');
-
-  const renewal = renewsOn.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  const scans = balance == null ? 'Loading scans…' : `${balance} AI ${balance === 1 ? 'scan' : 'scans'} left`;
   const level = levelFor(stats?.xp ?? 0);
-
-  const confirmLogout = () => {
-    Alert.alert('Log Out', 'Are you sure you want to log out?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Log Out', style: 'destructive', onPress: signOut },
-    ]);
-  };
+  const renewal = renewsOn.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -66,68 +60,55 @@ export default function ProfileScreen() {
             <Text style={styles.initials}>{initials}</Text>
           </View>
           <View style={styles.headerText}>
-            <Text style={styles.name}>{fullName}</Text>
-            {user?.email && <Text style={styles.email}>{user.email}</Text>}
-            <View style={styles.planRow}>
-              <View style={styles.planPill}>
-                <Text style={styles.planPillText}>Free plan</Text>
-              </View>
-              <Text style={styles.planMeta}>{scans}</Text>
+            <Text style={styles.name} numberOfLines={1}>
+              {fullName}
+            </Text>
+            {user?.email && (
+              <Text style={styles.email} numberOfLines={1}>
+                {user.email}
+              </Text>
+            )}
+          </View>
+        </View>
+
+        <Card style={styles.scans}>
+          <View style={styles.scansRow}>
+            <View style={styles.scansIcon}>
+              <Ionicons name="sparkles" size={20} color={colors.primary} />
+            </View>
+            <View style={styles.scansText}>
+              <Text style={styles.scansCount}>
+                {balance == null ? '–' : balance} AI {balance === 1 ? 'scan' : 'scans'} left
+              </Text>
+              <Text style={styles.scansHint}>
+                {FREE_MONTHLY_CREDITS} free scans every month • next on {renewal}
+              </Text>
             </View>
           </View>
-          <Pressable
-            onPress={() => router.push('/notifications')}
-            hitSlop={10}
-            accessibilityRole="button"
-            accessibilityLabel="Notifications"
-            style={styles.bell}
-          >
-            <Ionicons name="notifications-outline" size={22} color={colors.navy} />
-          </Pressable>
-        </View>
+          <PrimaryButton title="Get More Scans" icon="add-circle-outline" onPress={() => router.push('/paywall')} />
+        </Card>
 
         <Card style={styles.stats}>
           <Stat value={stats ? String(stats.current_streak) : '–'} label="Day streak" />
           <View style={styles.statDivider} />
           <Stat value={stats ? `Lv ${level.level}` : '–'} label={`${(stats?.xp ?? 0).toLocaleString()} XP`} />
           <View style={styles.statDivider} />
-          <Stat value={stats ? String(stats.meals_logged) : '–'} label="Meals logged" />
+          <Stat value={stats ? String(stats.meals_logged) : '–'} label="Meals" />
         </Card>
 
-        <Card style={styles.list}>
+        <Section title="Progress">
           <ListRow
             icon="trophy-outline"
-            title="My Goals & Body"
-            subtitle={goalSubtitle}
+            title="Goals & body"
+            subtitle={goalSubtitle || undefined}
             onPress={() => router.push('/edit-profile')}
           />
-          <ListRow
-            icon="scale-outline"
-            title="Log weight"
-            subtitle="Add a check-in with an optional photo"
-            onPress={() => router.push('/check-in')}
-          />
-          <ListRow
-            icon="images-outline"
-            title="Progress photos"
-            subtitle="Compare your transformation"
-            onPress={() => router.push('/transformation')}
-          />
-        </Card>
+          <ListRow icon="scale-outline" title="Log weight" onPress={() => router.push('/check-in')} />
+          <ListRow icon="images-outline" title="Progress photos" onPress={() => router.push('/transformation')} />
+          <ListRow icon="pulse-outline" title="Activity" onPress={() => router.push('/notifications')} last />
+        </Section>
 
-        <Card style={styles.list}>
-          <ListRow
-            icon="sparkles-outline"
-            title="AI scans"
-            subtitle={balance == null ? 'Free plan' : `Free plan • ${scans} • renews ${renewal}`}
-            onPress={() => router.push('/paywall')}
-          />
-          <ListRow
-            icon="notifications-circle-outline"
-            title="Activity"
-            subtitle="Your recent progress and reminders"
-            onPress={() => router.push('/notifications')}
-          />
+        <Section title="Preferences">
           <View style={styles.toggleRow}>
             <Ionicons name="mail-outline" size={20} color={colors.primary} />
             <View style={styles.toggleText}>
@@ -142,25 +123,33 @@ export default function ProfileScreen() {
               accessibilityLabel="Email updates"
             />
           </View>
-          <ListRow icon="speedometer-outline" title="Units" subtitle="Metric (kg, cm)" showChevron={false} />
-        </Card>
+        </Section>
 
-        <Card style={styles.list}>
+        <Section title="Account & legal">
           <ListRow icon="shield-checkmark-outline" title="Privacy Policy" onPress={() => router.push('/privacy')} />
           <ListRow icon="document-text-outline" title="Terms of Use" onPress={() => router.push('/terms')} />
-          <ListRow icon="log-out-outline" title="Log Out" danger onPress={confirmLogout} />
-          <ListRow
-            icon="trash-outline"
-            title="Delete Account"
-            subtitle="Permanently delete your account and data"
-            danger
-            onPress={() => router.push('/delete-account')}
-          />
-        </Card>
+          <ListRow icon="log-out-outline" title="Log Out" onPress={confirmLogout} showChevron={false} last />
+        </Section>
 
-        <Text style={styles.disclaimer}>{HEALTH_DISCLAIMER}</Text>
+        <Pressable
+          onPress={() => router.push('/delete-account')}
+          accessibilityRole="button"
+          hitSlop={8}
+          style={styles.deleteLink}
+        >
+          <Text style={styles.deleteText}>Delete account</Text>
+        </Pressable>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      <Card style={styles.list}>{children}</Card>
+    </View>
   );
 }
 
@@ -184,27 +173,25 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     paddingHorizontal: screenPadding,
     paddingTop: 16,
-    paddingBottom: 28,
+    paddingBottom: 32,
     gap: 16,
   },
   header: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     gap: 14,
   },
   avatar: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     backgroundColor: colors.primaryTint,
-    borderWidth: 2,
-    borderColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
   initials: {
     fontFamily: fonts.bold,
-    fontSize: 22,
+    fontSize: 20,
     color: colors.primary,
   },
   headerText: {
@@ -212,7 +199,7 @@ const styles = StyleSheet.create({
   },
   name: {
     fontFamily: fonts.bold,
-    fontSize: 19,
+    fontSize: 20,
     color: colors.navy,
   },
   email: {
@@ -221,33 +208,31 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: 2,
   },
-  planRow: {
+  scans: {
+    gap: 14,
+  },
+  scansRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginTop: 8,
+    gap: 12,
   },
-  planPill: {
-    backgroundColor: colors.primary,
-    borderRadius: radius.pill,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
+  scansIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.md,
+    backgroundColor: colors.primaryTint,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  planPillText: {
-    fontFamily: fonts.semibold,
-    fontSize: 11,
-    color: colors.white,
+  scansText: {
+    flex: 1,
   },
-  planMeta: {
-    fontFamily: fonts.regular,
-    fontSize: 11,
-    color: colors.textMuted,
+  scansCount: {
+    ...type.subheading,
   },
-  bell: {
-    paddingTop: 4,
-  },
-  list: {
-    paddingVertical: 0,
+  scansHint: {
+    ...type.caption,
+    marginTop: 2,
   },
   stats: {
     flexDirection: 'row',
@@ -274,13 +259,25 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     backgroundColor: colors.border,
   },
+  section: {
+    gap: 8,
+  },
+  sectionTitle: {
+    fontFamily: fonts.semibold,
+    fontSize: 12,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    color: colors.textMuted,
+    marginLeft: 4,
+  },
+  list: {
+    paddingVertical: 0,
+  },
   toggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
     paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
   },
   toggleText: {
     flex: 1,
@@ -290,15 +287,19 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.navy,
   },
-  disclaimer: {
-    ...type.caption,
-    textAlign: 'center',
-    paddingHorizontal: 8,
-  },
   toggleSubtitle: {
     fontFamily: fonts.regular,
     fontSize: 12,
     color: colors.textMuted,
     marginTop: 1,
+  },
+  deleteLink: {
+    alignSelf: 'center',
+    paddingVertical: 4,
+  },
+  deleteText: {
+    fontFamily: fonts.medium,
+    fontSize: 13,
+    color: colors.danger,
   },
 });

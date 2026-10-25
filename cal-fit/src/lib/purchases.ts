@@ -1,9 +1,10 @@
 /**
  * In-app purchases of AI scan packs via RevenueCat (StoreKit on iOS, Play Billing on Android).
  *
- * Native builds use the platform key; web and Expo Go run RevenueCat's Test Store (simulated
- * purchases), which only accepts a `test_` key. The app never grants credits itself: after a
- * purchase it asks /api/purchases/sync, which verifies the purchase with RevenueCat.
+ * Native builds use the platform key; web, Expo Go and native dev builds run RevenueCat's Test
+ * Store (simulated purchases), which only accepts a `test_` key. The app never grants credits
+ * itself: after a purchase it asks /api/purchases/sync, which verifies the purchase with
+ * RevenueCat.
  */
 
 import { Platform } from 'react-native';
@@ -22,8 +23,11 @@ let configuredFor: string | null = null;
 let setupQueue: Promise<void> = Promise.resolve();
 
 function apiKey(): string | undefined {
-  if (Platform.OS === 'ios') return IOS_KEY || TEST_STORE_KEY;
-  if (Platform.OS === 'android') return ANDROID_KEY || TEST_STORE_KEY;
+  // RevenueCat shows an alert and crashes a release (non-__DEV__) native build that uses a
+  // Test Store key, so phones only fall back to it in development builds.
+  const nativeTestKey = __DEV__ ? TEST_STORE_KEY : undefined;
+  if (Platform.OS === 'ios') return IOS_KEY || nativeTestKey;
+  if (Platform.OS === 'android') return ANDROID_KEY || nativeTestKey;
   return TEST_STORE_KEY;
 }
 

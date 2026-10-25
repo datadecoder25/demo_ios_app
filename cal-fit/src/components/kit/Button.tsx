@@ -68,8 +68,14 @@ export function SocialButton({ title, onPress, icon, iconColor, disabled }: Butt
       accessibilityRole="button"
       style={({ pressed }) => [styles.social, pressed && styles.pressed, disabled && styles.inactive]}
     >
-      {icon && <Ionicons name={icon} size={22} color={iconColor ?? colors.navy} style={styles.socialIcon} />}
-      <Text style={styles.socialText}>{title}</Text>
+      {/* Equal-width slots on both sides keep the title centered without ever overlapping the icon. */}
+      <View style={styles.socialSlot}>
+        {icon && <Ionicons name={icon} size={22} color={iconColor ?? colors.navy} />}
+      </View>
+      <Text style={styles.socialText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+        {title}
+      </Text>
+      <View style={styles.socialSlot} />
     </Pressable>
   );
 }
@@ -113,20 +119,24 @@ const styles = StyleSheet.create({
     color: colors.navy,
   },
   social: {
-    height: 54,
+    minHeight: 54,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surface,
     flexDirection: 'row',
     alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  socialSlot: {
+    width: 36,
+    alignItems: 'center',
     justifyContent: 'center',
   },
-  socialIcon: {
-    position: 'absolute',
-    left: 20,
-  },
   socialText: {
+    flex: 1,
+    textAlign: 'center',
     fontFamily: fonts.medium,
     fontSize: 15,
     color: colors.navy,

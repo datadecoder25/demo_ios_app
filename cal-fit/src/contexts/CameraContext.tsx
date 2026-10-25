@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useCallback, useContext, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 
 import { Alert } from '@/lib/alert';
@@ -60,10 +60,11 @@ export function CameraProvider({ children }: { children: React.ReactNode }) {
     await handleResult(await ImagePicker.launchImageLibraryAsync(PICKER_OPTIONS));
   }
 
-  function clearImage() {
+  // Stable, so the camera screen can clear the photo when it unmounts.
+  const clearImage = useCallback(() => {
     setImageUri(null);
     setPickError(null);
-  }
+  }, []);
 
   const value: CameraContextType = {
     imageUri,

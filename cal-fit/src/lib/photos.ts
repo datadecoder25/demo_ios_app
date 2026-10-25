@@ -5,6 +5,7 @@
  * photo is re-encoded as a JPEG no wider than MAX_PHOTO_EDGE before it's shown or uploaded.
  */
 
+import { File } from 'expo-file-system';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { Platform } from 'react-native';
 
@@ -67,11 +68,14 @@ export async function preparePhoto(
 /** Appends a local photo (file:// on native, blob:/data: on web) to a FormData body. */
 export async function appendPhoto(formData: FormData, uri: string) {
   if (Platform.OS === 'web') {
-    // Browsers need the actual file data; the { uri } shape only works in React Native.
     const blob = await (await fetch(uri)).blob();
     formData.append('photo', blob, 'photo.jpg');
   } else {
-    formData.append('photo', { uri, name: 'photo.jpg', type: 'image/jpeg' } as any);
+    // On phones the global fetch is expo/fetch, which rejects React Native's { uri } parts
+    // ("Unsupported FormDataPart implementation"). It reads any part with bytes(), using
+    // name and type for the part's headers; preparePhoto always produces a JPEG.
+    const file = new File(uri);
+    formData.append('photo', { name: 'photo.jpg', type: 'image/jpeg', bytes: () => file.bytes() } as any);
   }
 }
 

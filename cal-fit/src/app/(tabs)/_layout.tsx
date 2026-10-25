@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, fonts } from '@/constants/design';
 
@@ -12,7 +13,14 @@ const TABS: { name: string; title: string; icon: IconName; activeIcon: IconName 
   { name: 'profile', title: 'Profile', icon: 'person-outline', activeIcon: 'person' },
 ];
 
+const TAB_BAR_HEIGHT = 58;
+
 export default function TabLayout() {
+  // Android draws edge-to-edge, so the system navigation bar sits over the bottom of the
+  // screen; the tab bar grows by that inset (and the iPhone home indicator's) to stay above it.
+  const { bottom } = useSafeAreaInsets();
+  const bottomPadding = Math.max(bottom, 10);
+
   return (
     <Tabs
       screenOptions={{
@@ -22,9 +30,9 @@ export default function TabLayout() {
         tabBarStyle: {
           backgroundColor: colors.surface,
           borderTopColor: colors.border,
-          height: 76,
+          height: TAB_BAR_HEIGHT + bottomPadding,
           paddingTop: 8,
-          paddingBottom: 18,
+          paddingBottom: bottomPadding,
         },
         tabBarLabelStyle: {
           fontFamily: fonts.medium,

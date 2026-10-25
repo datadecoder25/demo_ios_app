@@ -143,6 +143,7 @@ export function ListRow({
   onPress,
   danger,
   showChevron = true,
+  last,
 }: {
   icon: IconName;
   title: string;
@@ -150,6 +151,8 @@ export function ListRow({
   onPress?: () => void;
   danger?: boolean;
   showChevron?: boolean;
+  /** The last row in its card: no divider below it. */
+  last?: boolean;
 }) {
   const tint = danger ? colors.danger : colors.primary;
   return (
@@ -157,7 +160,7 @@ export function ListRow({
       onPress={onPress}
       disabled={!onPress}
       accessibilityRole={onPress ? 'button' : 'text'}
-      style={({ pressed }) => [styles.listRow, pressed && styles.pressed]}
+      style={({ pressed }) => [styles.listRow, last && styles.listRowLast, pressed && styles.pressed]}
     >
       <Ionicons name={icon} size={20} color={tint} />
       <View style={styles.listText}>
@@ -250,6 +253,9 @@ const styles = StyleSheet.create({
   },
   chipTextActive: {
     color: colors.white,
+  },
+  listRowLast: {
+    borderBottomWidth: 0,
   },
   listRow: {
     flexDirection: 'row',

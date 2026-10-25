@@ -6,7 +6,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Card, IconCircle, OptionCard, PrimaryButton, ProgressBar, Screen } from '@/components/kit';
 import { SliderCard } from '@/components/onboarding/SliderCard';
 import { colors, fonts, type } from '@/constants/design';
-import { HEALTH_DISCLAIMER } from '@/constants/legal';
+import { HEALTH_DISCLAIMER, TERMS_VERSION } from '@/constants/legal';
 import { useUser } from '@/contexts/UserContext';
 import { Alert } from '@/lib/alert';
 import {
@@ -41,6 +41,8 @@ export default function OnboardingScreen() {
   const [isSaving, setIsSaving] = useState(false);
   // Marketing consent must be an explicit opt-in, so it starts unchecked.
   const [marketingOptIn, setMarketingOptIn] = useState(false);
+  // Required to finish: every sign-up method (email, Google, Apple) passes through here.
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
 
   const targets =
     gender && activity && goal
@@ -56,7 +58,9 @@ export default function OnboardingScreen() {
       : null;
 
   // Whether "Next" is enabled on each step (sliders always have a value).
-  const canContinue = [!!gender, true, true, true, true, !!activity, !!experience, !!goal, !!targets][step];
+  const canContinue = [!!gender, true, true, true, true, !!activity, !!experience, !!goal, !!targets && agreedToTerms][
+    step
+  ];
   const isLast = step === STEP_COUNT - 1;
 
   async function handleFinish() {
@@ -75,6 +79,7 @@ export default function OnboardingScreen() {
         daily_calorie_target: targets.calories,
         age,
         marketing_opt_in: marketingOptIn,
+        terms_version: TERMS_VERSION,
       });
       // The root layout's guards switch to the tabs once the profile exists; this is a fallback.
       router.replace('/');
@@ -208,6 +213,30 @@ export default function OnboardingScreen() {
           </Card>
 
           <Text style={styles.resultCopy}>{GOAL_COPY[goal ?? ''] ?? GOAL_COPY.gain_weight}</Text>
+
+          <Pressable
+            onPress={() => setAgreedToTerms(v => !v)}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: agreedToTerms }}
+            style={styles.optIn}
+          >
+            <Ionicons
+              name={agreedToTerms ? 'checkbox' : 'square-outline'}
+              size={22}
+              color={agreedToTerms ? colors.primary : colors.textMuted}
+            />
+            <Text style={styles.optInText}>
+              I agree to the{' '}
+              <Text style={styles.link} accessibilityRole="link" onPress={() => router.push('/terms')}>
+                Terms of Use
+              </Text>{' '}
+              and{' '}
+              <Text style={styles.link} accessibilityRole="link" onPress={() => router.push('/privacy')}>
+                Privacy Policy
+              </Text>
+              . (Required)
+            </Text>
+          </Pressable>
 
           <Pressable
             onPress={() => setMarketingOptIn(v => !v)}
@@ -371,6 +400,11 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 13,
     lineHeight: 19,
+  },
+  link: {
+    fontFamily: fonts.semibold,
+    color: colors.primary,
+    textDecorationLine: 'underline',
   },
   disclaimer: {
     ...type.caption,

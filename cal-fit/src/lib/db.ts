@@ -102,12 +102,15 @@ export interface Profile {
   /** Consent to marketing emails; the database stamps marketing_opt_in_at itself. */
   marketing_opt_in: boolean;
   marketing_opt_in_at: string | null;
+  /** Version of the Terms/Privacy Policy agreed to in onboarding; the database stamps the time. */
+  terms_version: string | null;
+  terms_accepted_at: string | null;
   created_at: string;
   updated_at: string;
 }
 
 export type ProfileInput = Partial<
-  Omit<Profile, 'id' | 'user_id' | 'marketing_opt_in_at' | 'created_at' | 'updated_at'>
+  Omit<Profile, 'id' | 'user_id' | 'marketing_opt_in_at' | 'terms_accepted_at' | 'created_at' | 'updated_at'>
 >;
 
 export const profileApi = {

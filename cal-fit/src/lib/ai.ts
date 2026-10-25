@@ -47,11 +47,18 @@ export async function triggerAiAnalysis(localImageUri: string): Promise<MealAnal
   await appendPhoto(formData, localImageUri);
 
   try {
-    const response = await fetch(apiUrl('/api/analyze-meal'), {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      body: formData,
-    });
+    let response: Response;
+    try {
+      response = await fetch(apiUrl('/api/analyze-meal'), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+    } catch (uploadError) {
+      // Network or encoding failures: keep the technical detail in the log, not on screen.
+      console.error('Photo upload failed:', uploadError);
+      throw new Error('Couldn’t upload the photo. Check your connection and try again.');
+    }
 
     const data = await response.json().catch(() => null);
     if (response.status === 402) {
