@@ -163,6 +163,13 @@ export const ACCOUNT_DELETION: LegalSection[] = [
     ],
   },
   {
+    heading: 'Delete some data and keep your account',
+    paragraphs: [
+      'In the app you can remove meals from your diary (open a meal and tap Delete), remove weigh-ins on the Progress tab, and stop marketing emails by turning off "Email updates" in Profile.',
+      `To have specific data permanently erased, such as meal or progress photos, without closing your account, email ${CONTACT_EMAIL} from your sign-up email address and tell us what to remove. We'll erase it within 30 days.`,
+    ],
+  },
+  {
     heading: 'What gets deleted',
     paragraphs: [
       'Your account and sign-in, profile and goals, meals and scan results, meal and progress photos, weigh-ins, water and workout logs, remaining AI scans (including purchased ones) and your email preferences.',
